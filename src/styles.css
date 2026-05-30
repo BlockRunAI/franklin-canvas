@@ -1638,6 +1638,19 @@ button:active:not(:disabled) { transform: scale(0.97); }
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 40px rgba(0,0,0,0.55); pointer-events: auto;
 }
+.prompt-bar-banner {
+  display: flex; align-items: center; gap: 8px;
+  margin: -2px -2px 8px;
+  padding: 7px 12px; border-radius: 12px;
+  background: rgba(245, 195, 120, 0.10); border: 1px solid rgba(245, 195, 120, 0.28);
+  color: #f5c378; font-size: 12px; line-height: 1.4;
+}
+.prompt-bar-banner svg { flex-shrink: 0; }
+.prompt-bar-banner code {
+  background: rgba(245,195,120,0.12); padding: 1px 5px; border-radius: 4px;
+  font-size: 11px; font-family: ui-monospace, monospace;
+}
+.prompt-bar-banner strong { color: #f5c378; font-weight: 600; }
 .prompt-bar-top, .prompt-bar-bottom { display: flex; align-items: center; gap: 8px; }
 .prompt-bar-input { width: 100%; margin: 10px 0; border: 0; background: transparent; color: var(--fg); font-size: 14px; resize: none; outline: none; font-family: inherit; }
 .prompt-bar-input::placeholder { color: var(--fg-faint); }

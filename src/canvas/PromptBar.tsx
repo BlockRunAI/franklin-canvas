@@ -10,11 +10,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useReactFlow, useStore } from '@xyflow/react';
 import {
-  Paperclip, ArrowUp, ImageIcon, Film, Music, X, Plus, Upload,
+  Paperclip, ArrowUp, ImageIcon, Film, Music, X, Plus, Upload, AlertCircle,
   type LucideIcon,
 } from 'lucide-react';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS } from './nodes';
 import ModelDropdown from '../components/ModelDropdown';
+import { getWallet } from '../api/franklin';
 
 type Mode = 'imagegen' | 'videogen' | 'musicgen';
 
@@ -168,8 +169,28 @@ export default function PromptBar({ onSend }: Props) {
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState<string>(IMAGE_MODELS[0].id);
   const [attachment, setAttachment] = useState<string | null>(null);
+  // Wallet readiness — null = unknown (still loading), true = at least one
+  // chain has an address configured, false = no wallet on either chain.
+  // Drives a one-line banner so first-time users see "configure a wallet"
+  // before they click Send and hit a backend error.
+  const [walletReady, setWalletReady] = useState<boolean | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { updateNodeData } = useReactFlow();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [base, sol] = await Promise.all([
+          getWallet('base').catch(() => null),
+          getWallet('solana').catch(() => null),
+        ]);
+        if (cancelled) return;
+        setWalletReady(!!(base?.address || sol?.address));
+      } catch { if (!cancelled) setWalletReady(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Hydrate from the bound node whenever the selection changes.
   useEffect(() => {
@@ -220,6 +241,15 @@ export default function PromptBar({ onSend }: Props) {
 
   return (
     <div className="prompt-bar nodrag nopan" onClick={(e) => e.stopPropagation()}>
+      {walletReady === false && (
+        <div className="prompt-bar-banner" role="status">
+          <AlertCircle size={13} aria-hidden />
+          <span>
+            No wallet configured — open <strong>Settings → Wallet</strong> to set
+            one (file under <code>~/.blockrun/</code>, same as Franklin core).
+          </span>
+        </div>
+      )}
       <div className="prompt-bar-top">
         <ReferencePicker
           attachment={attachment}

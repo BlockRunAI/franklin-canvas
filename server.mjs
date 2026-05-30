@@ -5,12 +5,12 @@
 // ~/.blockrun/ (shared with Franklin if both are installed).
 //
 // Endpoints:
-//   GET  /api/wallet                — balance + recent spend
-//   GET  /api/wallet/transactions   — spend log
-//   GET  /api/sessions              — (empty; canvas doesn't persist sessions)
-//   POST /api/generate              — { kind, prompt, model?, durationS?, lyrics?, instrumental?, imageUrl? }
-//   GET  /api/generated/<file>      — serves a generated file from ~/.franklin/web-jobs/
-//   GET  /api/prompts               — scraped prompt library
+//   GET  /api/wallet?chain=base|solana   — address, USDC balance, spend
+//   GET  /api/wallet/transactions        — per-call spend log
+//   POST /api/generate                   — { kind, prompt, model?, durationS?, lyrics?, instrumental?, imageUrl?, aspectRatio?, resolution?, generateAudio? }
+//   GET  /api/generated/<file>           — serves a generated file from ~/.franklin/web-jobs/
+//   GET  /api/prompts                    — open prompt library index
+//   GET  /api/prompts/detail?path=…      — single prompt body + cover image
 //   GET  /api/health
 
 import http from 'node:http';
@@ -41,15 +41,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const JOBS_DIR = path.join(os.homedir(), '.franklin', 'web-jobs');
 fs.mkdirSync(JOBS_DIR, { recursive: true });
 
-const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type',
-};
+// CORS — wide open in dev so any Vite port can talk to :3100. In production,
+// set ALLOWED_ORIGINS to a comma-separated list of origins (or "*" if you
+// really mean any). Anything not in the list is rejected.
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
+  : null; // null => dev mode, allow any
+function corsHeaders(req) {
+  const origin = req.headers.origin || '';
+  const allow = ALLOWED_ORIGINS === null
+    ? '*'
+    : (ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.includes(origin) ? origin : '');
+  return {
+    'Access-Control-Allow-Origin': allow,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'content-type',
+    'Vary': 'Origin',
+  };
+}
 
-function json(res, body, status = 200) {
+function json(req, res, body, status = 200) {
   const s = JSON.stringify(body);
-  res.writeHead(status, { 'Content-Type': 'application/json', ...cors });
+  res.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders(req) });
   res.end(s);
 }
 
@@ -386,7 +399,7 @@ async function getPromptDetail(relPath) {
 // ── HTTP routing ───────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return; }
+  if (req.method === 'OPTIONS') { res.writeHead(204, corsHeaders(req)); res.end(); return; }
   const p = (req.url || '').split('?')[0];
 
   try {
@@ -439,17 +452,17 @@ const server = http.createServer(async (req, res) => {
           }
         } catch { /* ignore — show 0 if balance lookup fails */ }
         const network = chain === 'solana' ? 'Solana' : 'Base';
-        return json(res, { address, balanceUsdc, recentSpendUsd, totalSpendUsd, network, chain, spendByCategory });
+        return json(req, res, { address, balanceUsdc, recentSpendUsd, totalSpendUsd, network, chain, spendByCategory });
       } catch (err) {
         const network = chain === 'solana' ? 'Solana' : 'Base';
-        return json(res, { address: '', balanceUsdc: 0, recentSpendUsd: 0, totalSpendUsd: 0, network, chain, spendByCategory: [], error: String(err) });
+        return json(req, res, { address: '', balanceUsdc: 0, recentSpendUsd: 0, totalSpendUsd: 0, network, chain, spendByCategory: [], error: String(err) });
       }
     }
 
     if (p === '/api/wallet/transactions' && req.method === 'GET') {
       try {
         const logPath = SHARED_COST_LOG;
-        if (!fs.existsSync(logPath)) return json(res, []);
+        if (!fs.existsSync(logPath)) return json(req, res, []);
         const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
         const txs = lines
           .map((l) => { try { return JSON.parse(l); } catch { return null; } })
@@ -478,22 +491,18 @@ const server = http.createServer(async (req, res) => {
           })
           .sort((a, b) => b.ts - a.ts)
           .slice(0, 100);
-        return json(res, txs);
+        return json(req, res, txs);
       } catch {
-        return json(res, []);
+        return json(req, res, []);
       }
-    }
-
-    if (p === '/api/sessions' && req.method === 'GET') {
-      return json(res, []);
     }
 
     if (p === '/api/generate' && req.method === 'POST') {
       const raw = await readBody(req);
       const body = JSON.parse(raw);
-      if (!body.prompt) return json(res, { ok: false, error: 'prompt required' }, 400);
+      if (!body.prompt) return json(req, res, { ok: false, error: 'prompt required' }, 400);
       if (!['image', 'video', 'music'].includes(body.kind)) {
-        return json(res, { ok: false, error: 'kind must be image|video|music' }, 400);
+        return json(req, res, { ok: false, error: 'kind must be image|video|music' }, 400);
       }
       const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const t0 = Date.now();
@@ -504,24 +513,24 @@ const server = http.createServer(async (req, res) => {
         const ms = Date.now() - t0;
         const cost = result.costUsd != null ? `$${result.costUsd.toFixed(4)}` : '?';
         console.log(`[generate] ${body.kind} ${body.model || 'default'} ok ${ms}ms ${cost}`);
-        return json(res, { ok: true, ...result });
+        return json(req, res, { ok: true, ...result });
       } catch (err) {
         const ms = Date.now() - t0;
         console.warn(`[generate] ${body.kind} ${body.model || 'default'} FAIL ${ms}ms: ${err.message || err}`);
-        return json(res, { ok: false, error: err.message || String(err) }, 502);
+        return json(req, res, { ok: false, error: err.message || String(err) }, 502);
       }
     }
 
     if (p === '/api/health' && req.method === 'GET') {
-      return json(res, { ok: true });
+      return json(req, res, { ok: true });
     }
 
     if (p === '/api/prompts' && req.method === 'GET') {
       try {
         const items = await getPromptLibrary();
-        return json(res, { ok: true, items });
+        return json(req, res, { ok: true, items });
       } catch (err) {
-        return json(res, { ok: false, error: err.message || String(err), items: [] }, 502);
+        return json(req, res, { ok: false, error: err.message || String(err), items: [] }, 502);
       }
     }
 
@@ -529,9 +538,9 @@ const server = http.createServer(async (req, res) => {
       try {
         const relPath = new URL(req.url, 'http://x').searchParams.get('path') || '';
         const detail = await getPromptDetail(relPath);
-        return json(res, { ok: true, ...detail });
+        return json(req, res, { ok: true, ...detail });
       } catch (err) {
-        return json(res, { ok: false, error: err.message || String(err) }, 502);
+        return json(req, res, { ok: false, error: err.message || String(err) }, 502);
       }
     }
 
@@ -552,33 +561,23 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, {
         'Content-Type': mime,
         'Content-Length': fs.statSync(filePath).size,
-        ...cors,
+        ...corsHeaders(req),
         'Cache-Control': 'public, max-age=3600',
       });
       fs.createReadStream(filePath).pipe(res);
       return;
     }
 
-    // Chat stream — kept as a stub so the Chat view doesn't blow up.
-    if (p === '/api/chat/stream' && req.method === 'POST') {
-      res.writeHead(200, { 'Content-Type': 'text/event-stream', ...cors });
-      res.write(`data: ${JSON.stringify({ type: 'token', token: 'Chat streaming is not wired in this build.' })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'done', model: 'none', costUsd: 0 })}\n\n`);
-      res.end();
-      return;
-    }
-
-    res.writeHead(404, cors); res.end('Not found');
+    res.writeHead(404, corsHeaders(req)); res.end('Not found');
   } catch (err) {
-    json(res, { ok: false, error: String(err) }, 500);
+    json(req, res, { ok: false, error: String(err) }, 500);
   }
 });
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Franklin Canvas backend on http://127.0.0.1:${PORT}`);
-  console.log('  GET  /api/wallet');
+  console.log('  GET  /api/wallet?chain=base|solana');
   console.log('  GET  /api/wallet/transactions');
-  console.log('  GET  /api/sessions');
   console.log('  POST /api/generate');
   console.log('  GET  /api/generated/<file>');
   console.log('  GET  /api/prompts');

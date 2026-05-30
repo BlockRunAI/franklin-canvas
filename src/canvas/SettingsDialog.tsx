@@ -123,6 +123,10 @@ function WalletPane() {
             </button>
           </dd>
         </div>
+        <div>
+          <dt>Loaded from</dt>
+          <dd><code>{chain === 'solana' ? '~/.blockrun/solana-wallet' : '~/.blockrun/wallet'}</code></dd>
+        </div>
         <div><dt>Spent (24h)</dt><dd>${w.recentSpendUsd.toFixed(2)}</dd></div>
         {typeof w.totalSpendUsd === 'number' && w.totalSpendUsd > 0 && (
           <div><dt>Spent (all-time, shared wallet)</dt><dd>${w.totalSpendUsd.toFixed(2)}</dd></div>

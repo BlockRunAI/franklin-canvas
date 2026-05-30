@@ -28,6 +28,13 @@ import { getOrCreateCurrent, saveProjectCanvas, renameProject } from '../project
 import { useUiStore } from '../uiStore';
 import { useThemeStore } from '../canvas/themeStore';
 
+// Demo seed for first-time users. Defaults pick the cheapest model in each
+// catalog so a curious click on "Send" costs ~cents, not dollars (the prior
+// seed used Seedance 2.0 cinematic at $1.60/clip). Prompts are deliberately
+// generic so they read for anyone, not just folks already in the Franklin
+// world.
+const CHEAP_IMAGE = IMAGE_MODELS.find((m) => m.id === 'google/nano-banana') ?? IMAGE_MODELS[0];
+const CHEAP_VIDEO = [...VIDEO_MODELS].sort((a, b) => a.pricePerS - b.pricePerS)[0];
 const INITIAL_NODES: Node[] = [
   { id: 'n1', type: 'upload', position: { x: 80, y: 160 }, data: { label: 'photo' } },
   {
@@ -36,9 +43,9 @@ const INITIAL_NODES: Node[] = [
     position: { x: 460, y: 80 },
     data: {
       label: 'image',
-      model: IMAGE_MODELS[1].id,
-      prompt: 'A Franklin lobster in cyberpunk style, neon glow',
-      priceUsd: IMAGE_MODELS[1].price,
+      model: CHEAP_IMAGE.id,
+      prompt: 'A serene Japanese garden at golden hour, shot on 35mm film',
+      priceUsd: CHEAP_IMAGE.price,
     } as GenNodeData,
   },
   {
@@ -47,9 +54,9 @@ const INITIAL_NODES: Node[] = [
     position: { x: 460, y: 360 },
     data: {
       label: 'video',
-      model: VIDEO_MODELS[0].id,
-      prompt: '8s cinematic shot of the lobster walking through Tokyo',
-      priceUsd: VIDEO_MODELS[0].pricePerS * 8,
+      model: CHEAP_VIDEO.id,
+      prompt: '8s cinematic shot of a paper plane drifting through clouds',
+      priceUsd: CHEAP_VIDEO.pricePerS * 8,
       durationS: 8,
     } as GenNodeData,
   },
