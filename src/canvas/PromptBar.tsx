@@ -245,8 +245,10 @@ export default function PromptBar({ onSend }: Props) {
         <div className="prompt-bar-banner" role="status">
           <AlertCircle size={13} aria-hidden />
           <span>
-            No wallet configured — open <strong>Settings → Wallet</strong> to set
-            one (file under <code>~/.blockrun/</code>, same as Franklin core).
+            No wallet configured. Install{' '}
+            <a href="https://github.com/BlockRunAI/Franklin" target="_blank" rel="noopener noreferrer">Franklin core</a>{' '}
+            and run <code>franklin wallet init</code>, then top up with USDC on
+            Base or Solana.
           </span>
         </div>
       )}
