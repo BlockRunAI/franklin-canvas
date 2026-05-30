@@ -62,13 +62,13 @@ function readBody(req) {
   });
 }
 
-// Resolve the wallet private key from ~/.blockrun (or env). The server boots
-// even if no wallet is configured yet — generation calls just error.
+// Resolve the wallet private key the same way Franklin core does: SDK file
+// (~/.blockrun/wallet) first, then BASE_CHAIN_WALLET_KEY env override. The
+// server boots even if no wallet is configured yet — generation calls just
+// error with a clear message until one is set.
 function getWallet() {
   try {
-    // loadWallet() returns the private-key string (or null); the address comes
-    // from getWalletAddress().
-    const privateKey = process.env.BLOCKRUN_WALLET_KEY || loadWallet() || null;
+    const privateKey = loadWallet() || process.env.BASE_CHAIN_WALLET_KEY || null;
     let address = '';
     try { address = getWalletAddress() || ''; } catch { /* ignore */ }
     return { privateKey, address };
@@ -83,7 +83,7 @@ function getWallet() {
 // solanaPublicKey() needs @solana/web3.js, so we await it at call site.
 async function getSolanaWallet() {
   try {
-    const privateKey = process.env.SOLANA_WALLET_KEY || loadSolanaWallet() || null;
+    const privateKey = loadSolanaWallet() || process.env.SOLANA_WALLET_KEY || null;
     let address = '';
     if (privateKey) {
       try { address = await solanaPublicKey(privateKey); } catch { /* ignore */ }
@@ -141,7 +141,7 @@ function diffSpend(before, after) {
 
 async function generateImage(body, jobId) {
   const { privateKey } = await getWallet();
-  if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BLOCKRUN_WALLET_KEY.');
+  if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.');
   const client = new ImageClient({ privateKey, apiUrl });
   const opts = { model: body.model || 'google/nano-banana' };
   if (body.size) opts.size = body.size;
@@ -160,7 +160,7 @@ async function generateImage(body, jobId) {
 
 async function generateMusic(body, jobId) {
   const { privateKey } = await getWallet();
-  if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BLOCKRUN_WALLET_KEY.');
+  if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.');
   const client = new MusicClient({ privateKey, apiUrl });
   const opts = { model: body.model || 'minimax/music-2.5+' };
   if (body.durationS) opts.durationSeconds = body.durationS;
@@ -208,7 +208,7 @@ async function signVideoPayment(response, endpoint, privateKey, address) {
 // VideoClient.generate auto-poll omits this header → "Poll failed: HTTP 402".)
 async function generateVideo(body, jobId) {
   const { privateKey, address } = getWallet();
-  if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BLOCKRUN_WALLET_KEY.');
+  if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.');
   const model = body.model || 'bytedance/seedance-2.0';
   const endpoint = `${GATEWAY}/v1/videos/generations`;
   const reqBody = JSON.stringify({

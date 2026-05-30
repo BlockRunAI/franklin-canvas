@@ -53,13 +53,18 @@ npm install
 npm start            # → http://localhost:5173
 ```
 
-A funded wallet is needed for real generations — the backend reads `~/.blockrun/` (shared with
-[Franklin core](https://github.com/BlockRunAI/Franklin) if installed), or set one of:
+Wallet configuration is **identical to [Franklin core](https://github.com/BlockRunAI/Franklin)** —
+they share `~/.blockrun/` and the same env vars, so if Franklin works on this machine, the canvas
+works too. Use whichever you prefer:
 
-- `BLOCKRUN_WALLET_KEY` — EVM hex key (Base settlement)
-- `SOLANA_WALLET_KEY` — bs58 secret key (Solana settlement)
+| Chain  | Wallet file (preferred)        | Env override               |
+|--------|--------------------------------|----------------------------|
+| Base   | `~/.blockrun/wallet`           | `BASE_CHAIN_WALLET_KEY`    |
+| Solana | `~/.blockrun/solana-wallet`    | `SOLANA_WALLET_KEY`        |
 
-The UI is fully usable without funds; generation calls just return a clear error you can retry.
+A funded wallet is needed for real generations. The UI is fully usable without funds; generation
+calls just return a clear error you can retry. Switch chain at runtime in
+`Settings → Wallet`.
 
 Run the halves separately if you prefer:
 

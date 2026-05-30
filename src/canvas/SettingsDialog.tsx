@@ -102,10 +102,10 @@ function WalletPane() {
       {chainSwitch}
       {isEmpty ? (
         <p className="settings-foot-note">
-          No {chain === 'solana' ? 'Solana' : 'Base'} wallet configured. Set{' '}
-          <code>{chain === 'solana' ? 'SOLANA_WALLET_KEY' : 'BLOCKRUN_WALLET_KEY'}</code>{' '}
-          in your env, or save a key to{' '}
-          <code>{chain === 'solana' ? '~/.blockrun/solana-wallet' : '~/.blockrun/wallet'}</code>.
+          No {chain === 'solana' ? 'Solana' : 'Base'} wallet configured. Save a
+          key to <code>{chain === 'solana' ? '~/.blockrun/solana-wallet' : '~/.blockrun/wallet'}</code>{' '}
+          (the same file Franklin core uses), or set{' '}
+          <code>{chain === 'solana' ? 'SOLANA_WALLET_KEY' : 'BASE_CHAIN_WALLET_KEY'}</code> in your env.
         </p>
       ) : (
       <>
