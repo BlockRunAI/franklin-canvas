@@ -22,14 +22,22 @@ import {
   LLMClient,
   ImageClient,
   MusicClient,
-  VideoClient,
+  SolanaLLMClient,
   loadWallet,
+  loadSolanaWallet,
   getWalletAddress,
+  solanaPublicKey,
   getCostLogSummary,
+  parsePaymentRequired,
+  extractPaymentDetails,
+  createPaymentPayload,
 } from '@blockrun/llm';
 
 const PORT = 3100;
 const apiUrl = process.env.BLOCKRUN_API_URL || undefined;
+// Gateway origin for the manual x402 video submit+poll flow.
+const GATEWAY = process.env.BLOCKRUN_API_URL || 'https://blockrun.ai/api';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const JOBS_DIR = path.join(os.homedir(), '.franklin', 'web-jobs');
 fs.mkdirSync(JOBS_DIR, { recursive: true });
 
@@ -63,6 +71,23 @@ function getWallet() {
     const privateKey = process.env.BLOCKRUN_WALLET_KEY || loadWallet() || null;
     let address = '';
     try { address = getWalletAddress() || ''; } catch { /* ignore */ }
+    return { privateKey, address };
+  } catch {
+    return { privateKey: null, address: '' };
+  }
+}
+
+// Solana wallet companion. Returns the bs58-encoded secret key + the base58
+// public-key derived from it. SDK loads from ~/.blockrun/solana-wallet (or
+// SOLANA_WALLET_KEY env). Address derivation is async because
+// solanaPublicKey() needs @solana/web3.js, so we await it at call site.
+async function getSolanaWallet() {
+  try {
+    const privateKey = process.env.SOLANA_WALLET_KEY || loadSolanaWallet() || null;
+    let address = '';
+    if (privateKey) {
+      try { address = await solanaPublicKey(privateKey); } catch { /* ignore */ }
+    }
     return { privateKey, address };
   } catch {
     return { privateKey: null, address: '' };
@@ -152,78 +177,210 @@ async function generateMusic(body, jobId) {
   return { resultUrl: `/api/generated/${jobId}.${ext}`, costUsd };
 }
 
+// Sign an x402 payment-required response into a PAYMENT-SIGNATURE header.
+async function signVideoPayment(response, endpoint, privateKey, address) {
+  let header = response.headers.get('payment-required');
+  if (!header) {
+    try {
+      const b = await response.clone().json();
+      if (b.x402 || b.accepts) header = Buffer.from(JSON.stringify(b)).toString('base64');
+    } catch { /* ignore */ }
+  }
+  if (!header) return null;
+  const paymentRequired = parsePaymentRequired(header);
+  const details = extractPaymentDetails(paymentRequired);
+  const payload = await createPaymentPayload(
+    privateKey, address, details.recipient, details.amount,
+    details.network || 'eip155:8453',
+    {
+      resourceUrl: details.resource?.url || endpoint,
+      resourceDescription: details.resource?.description || 'Franklin Canvas video',
+      maxTimeoutSeconds: details.maxTimeoutSeconds || 60,
+      extra: details.extra,
+    },
+  );
+  return { 'PAYMENT-SIGNATURE': payload };
+}
+
+// Video uses async submit + poll. CRITICAL: the signed PAYMENT-SIGNATURE header
+// from the 402 retry must be reused on EVERY poll GET — the gateway verifies
+// identity on each poll and settles on the first completed response. (The SDK's
+// VideoClient.generate auto-poll omits this header → "Poll failed: HTTP 402".)
 async function generateVideo(body, jobId) {
-  const { privateKey } = await getWallet();
+  const { privateKey, address } = getWallet();
   if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BLOCKRUN_WALLET_KEY.');
-  // Bump the SDK polling budget — Seedance 2.0 frequently exceeds 5min during
-  // peak; the SDK doesn't take payment when it gives up, so a longer wait is free.
-  const client = new VideoClient({ privateKey, timeout: 10 * 60 * 1000, apiUrl });
-  const opts = { model: body.model || 'bytedance/seedance-2.0', budgetMs: 10 * 60 * 1000 };
-  if (body.imageUrl) opts.imageUrl = body.imageUrl;
-  if (body.durationS) opts.durationSeconds = body.durationS;
-  if (body.aspectRatio) opts.aspectRatio = body.aspectRatio;
-  if (body.resolution) opts.resolution = body.resolution;
-  opts.generateAudio = typeof body.generateAudio === 'boolean' ? body.generateAudio : true;
-  if (typeof body.seed === 'number') opts.seed = body.seed;
-  if (typeof body.watermark === 'boolean') opts.watermark = body.watermark;
-  if (body.returnLastFrame) opts.returnLastFrame = true;
-  const before = client.getSpending?.();
-  const result = await client.generate(body.prompt, opts);
-  const after = client.getSpending?.();
-  const remoteUrl = result?.data?.[0]?.url;
-  if (!remoteUrl) throw new Error('Video gateway returned no URL');
+  const model = body.model || 'bytedance/seedance-2.0';
+  const endpoint = `${GATEWAY}/v1/videos/generations`;
+  const reqBody = JSON.stringify({
+    model,
+    prompt: body.prompt,
+    ...(body.imageUrl ? { image_url: body.imageUrl } : {}),
+    ...(body.durationS ? { duration_seconds: body.durationS } : {}),
+    ...(body.aspectRatio ? { aspect_ratio: body.aspectRatio } : {}),
+    ...(body.resolution ? { resolution: body.resolution } : {}),
+    ...(typeof body.generateAudio === 'boolean' ? { generate_audio: body.generateAudio } : {}),
+  });
+  const headers = { 'Content-Type': 'application/json', 'User-Agent': 'franklin-canvas' };
+
+  // Phase 1: submit (first POST → 402 → sign → retry with payment header).
+  let resp = await fetch(endpoint, { method: 'POST', headers, body: reqBody });
+  let paymentHeaders = null;
+  if (resp.status === 402) {
+    paymentHeaders = await signVideoPayment(resp, endpoint, privateKey, address);
+    if (!paymentHeaders) throw new Error('Payment signing failed — check wallet balance.');
+    resp = await fetch(endpoint, { method: 'POST', headers: { ...headers, ...paymentHeaders }, body: reqBody });
+  }
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => '');
+    throw new Error(`Video submit failed (${resp.status}): ${t.slice(0, 300)}`);
+  }
+  const submit = await resp.json();
+  if (!submit.poll_url || !paymentHeaders) {
+    throw new Error(`No poll_url returned: ${JSON.stringify(submit).slice(0, 200)}`);
+  }
+  const origin = new URL(GATEWAY).origin;
+  const pollUrl = submit.poll_url.startsWith('http') ? submit.poll_url : `${origin}${submit.poll_url}`;
+
+  // Phase 2: poll until completion. The gateway returns 402 on the poll while
+  // the job is still running (a settlement challenge that only resolves once
+  // the result is ready) — so we treat 402 as "in progress", re-sign, and keep
+  // polling. Settlement happens on the completed 200 response. (The SDK's
+  // built-in poll throws on this 402, which is why we poll manually.)
+  const startedAt = Date.now();
+  const deadline = startedAt + 20 * 60 * 1000; // Seedance cinematic/pro can run long
+  let remoteUrl;
+  let polls = 0;
+  while (Date.now() < deadline) {
+    await sleep(5000);
+    const pr = await fetch(pollUrl, { headers: { ...headers, ...paymentHeaders } });
+    let pj = {};
+    if (pr.status === 200 || pr.status === 202) { pj = await pr.json().catch(() => ({})); }
+    if (++polls % 3 === 0 || pr.status !== 202) {
+      console.log(`[video poll #${polls}] http=${pr.status} status=${pj.status ?? '-'} t=${Math.round((Date.now() - startedAt) / 1000)}s`);
+    }
+    if (pr.status === 200 || pr.status === 202) {
+      if (pj.status === 'completed' && pj.data?.[0]?.url) { remoteUrl = pj.data[0].url; break; }
+      if (pj.status === 'failed') throw new Error(`Video failed upstream: ${JSON.stringify(pj.error || '').slice(0, 200)}`);
+      // queued / in_progress → keep polling
+    } else if (pr.status === 402) {
+      const re = await signVideoPayment(pr, endpoint, privateKey, address);
+      if (re) paymentHeaders = re;
+    } else if (pr.status === 429 || pr.status >= 500) {
+      // transient → keep polling
+    } else {
+      const t = await pr.text().catch(() => '');
+      throw new Error(`Poll failed (${pr.status}): ${t.slice(0, 200)}`);
+    }
+  }
+  if (!remoteUrl) throw new Error('Video generation timed out (no completion within 10min). No payment settled.');
   const { ext } = await downloadTo(remoteUrl, path.join(JOBS_DIR, jobId), 'mp4');
-  const costUsd = diffSpend(before, after);
-  appendCostLog({ endpoint: '/v1/videos/generations', costUsd, model: opts.model, wallet: client.getWalletAddress?.(), kind: 'VideoClient' });
+  const costUsd = body.durationS ? body.durationS * 0.2 : 0; // estimate for the spend log
+  appendCostLog({ endpoint: '/v1/videos/generations', costUsd, model, wallet: address, kind: 'VideoClient' });
   return { resultUrl: `/api/generated/${jobId}.${ext}`, costUsd };
 }
 
-// ── Prompt library (scraped from public GitHub "awesome prompts" repos) ──
-const PROMPT_SOURCES = [
-  {
-    id: 'gpt-image2',
-    url: 'https://raw.githubusercontent.com/davidwuw0811-boop/awesome-gpt-image2-prompts/main/prompts.json',
-    imageBase: 'https://raw.githubusercontent.com/davidwuw0811-boop/awesome-gpt-image2-prompts/main',
-  },
-];
+// ── Prompt library ──
+// Sourced from BlockRun's curated case library, which aggregates several
+// public prompt repos into ~848 normalized cases (one markdown file each with
+// frontmatter: title / workflow / model / tags + an "## Original prompt").
+//
+// The catalog (titles + metadata) lives in a single INDEX.md, fetched once.
+// The full prompt body for a case is fetched on demand (when the user clicks
+// "Use") so we never pull 848 files up front.
+const CASE_LIB_BASE = 'https://raw.githubusercontent.com/BlockRunAI/Claude-Code-GPT-IMAGE2-SeeDance-BlockRun/main/prompts/case-library';
 const PROMPT_TTL_MS = 6 * 60 * 60 * 1000; // 6h
 let promptCache = { at: 0, items: [] };
 
-function absImage(base, img) {
-  if (!img) return '';
-  if (/^https?:\/\//.test(img)) return img;
-  return `${base}/${String(img).replace(/^\.?\//, '')}`;
+// Parse INDEX.md lines like:
+//   - [Title](from-repo/123.md) — image2image · openai/gpt-image-2 [tag1, tag2]
+function parseIndex(md) {
+  const items = [];
+  const re = /^\s*-\s*\[(.+?)\]\((from-[^)]+\.md)\)\s*—\s*(\S+)\s*·\s*(\S+)\s*(?:\[(.*?)\])?/gm;
+  let m;
+  while ((m = re.exec(md))) {
+    const [, title, path, workflow, model, tagStr] = m;
+    const tags = (tagStr || '').split(',').map((t) => t.trim()).filter(Boolean);
+    items.push({
+      id: path,
+      title: title.trim(),
+      titleCn: '',
+      category: tags[0] || workflow,
+      workflow,
+      model,
+      tags,
+      prompt: '',            // filled on demand via /api/prompts/detail
+      image: '',
+      path,
+      needsRef: workflow === 'image2image' || workflow === 'image2video',
+      source: 'blockrun-case-library',
+    });
+  }
+  return items;
 }
 
 async function getPromptLibrary() {
   if (promptCache.items.length && Date.now() - promptCache.at < PROMPT_TTL_MS) {
     return promptCache.items;
   }
-  const all = [];
-  for (const src of PROMPT_SOURCES) {
-    try {
-      const r = await fetch(src.url, { headers: { 'user-agent': 'franklin-canvas' } });
-      if (!r.ok) continue;
-      const data = await r.json();
-      const list = Array.isArray(data) ? data : data.prompts || data.records || [];
-      for (const it of list) {
-        const prompt = it.prompt || it.content || '';
-        if (!prompt) continue;
-        all.push({
-          id: `${src.id}-${it.id ?? all.length}`,
-          title: it.title_en || it.title || it.title_cn || 'Untitled',
-          titleCn: it.title_cn || '',
-          category: it.category_cn || it.category || 'general',
-          prompt,
-          image: absImage(src.imageBase, it.image),
-          needsRef: !!it.needs_ref,
-          source: src.id,
-        });
-      }
-    } catch { /* skip a failed source, keep the rest */ }
+  const r = await fetch(`${CASE_LIB_BASE}/INDEX.md`, { headers: { 'user-agent': 'franklin-canvas' } });
+  if (!r.ok) return promptCache.items;
+  const md = await r.text();
+  const items = parseIndex(md);
+  if (items.length) promptCache = { at: Date.now(), items };
+  return items;
+}
+
+// Replace {argument name="..." default="VALUE"} (quotes may be JSON-escaped
+// as \") with VALUE; drop any argument tag that has no default.
+function resolveArguments(text) {
+  let out = text;
+  // with default
+  out = out.replace(/\{\s*argument\b[^}]*?default=\\?"((?:[^"\\]|\\.)*?)\\?"[^}]*?\}/g, (_, v) => v.replace(/\\"/g, '"'));
+  // leftover argument tags without a default → remove
+  out = out.replace(/\{\s*argument\b[^}]*?\}/g, '');
+  return out;
+}
+
+// Fetch + parse a single case file: pull the prompt body and a preview image.
+async function getPromptDetail(relPath) {
+  if (!relPath || relPath.includes('..') || !relPath.startsWith('from-')) {
+    throw new Error('bad path');
   }
-  if (all.length) promptCache = { at: Date.now(), items: all };
-  return all.length ? all : promptCache.items;
+  const r = await fetch(`${CASE_LIB_BASE}/${relPath}`, { headers: { 'user-agent': 'franklin-canvas' } });
+  if (!r.ok) throw new Error(`case ${r.status}`);
+  const raw = await r.text();
+  // Split frontmatter (between the first pair of --- lines) from the body.
+  let body = raw;
+  let fmImage = '';
+  let title = '';
+  const fm = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (fm) {
+    body = fm[2];
+    const t = fm[1].match(/^title:\s*"?(.+?)"?\s*$/m);
+    if (t) title = t[1];
+    const u = fm[1].match(/url:\s*"?(https?:\/\/[^"\s]+)"?/);
+    if (u) fmImage = u[1];
+  }
+  // Image: prefer a markdown image in the body, else the frontmatter asset.
+  const imgM = body.match(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/);
+  const image = imgM ? imgM[1] : fmImage;
+  // Prompt: the text after "## Original prompt" / "## Prompt", else the body
+  // with images/headings stripped.
+  let prompt = '';
+  const ph = body.split(/##\s*(?:Original\s+prompt|Prompt|提示词)\s*\n/i);
+  let seg = ph.length > 1 ? ph[1] : body;
+  // The prompt ends at the next section heading (e.g. "## Run via Claude Code",
+  // "## Credit & license") — cut there so the footer/attribution isn't included.
+  seg = seg.split(/\n#{2,4}\s/)[0];
+  prompt = seg
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')   // drop images
+    .replace(/^#+\s.*$/gm, '')               // drop headings
+    .replace(/```[a-z]*\n?/gi, '')           // unwrap fenced blocks
+    .trim();
+  // Resolve template placeholders {argument name="x" default="y"} → "y" so the
+  // prompt reads as plain text instead of showing the raw template/JSON.
+  prompt = resolveArguments(prompt);
+  return { title, prompt, image };
 }
 
 // ── HTTP routing ───────────────────────────────────────────────────────
@@ -234,32 +391,58 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (p === '/api/wallet' && req.method === 'GET') {
+      // Optional ?chain=base|solana — defaults to base. Spend history is
+      // shared across chains (it lives in the BlockRun cost log) and isn't
+      // chain-tagged, so both branches return the same recent/total/byModel
+      // figures — only the wallet address + on-chain balance differ.
+      const url = new URL(req.url, 'http://localhost');
+      const chain = (url.searchParams.get('chain') || 'base').toLowerCase() === 'solana' ? 'solana' : 'base';
       try {
-        const { address, privateKey } = getWallet();
+        const wallet = chain === 'solana' ? await getSolanaWallet() : getWallet();
+        const { address, privateKey } = wallet;
         let balanceUsdc = 0;
-        let recentSpendUsd = 0;
+        let recentSpendUsd = 0;   // true rolling 24h
+        let totalSpendUsd = 0;    // all-time
         let spendByCategory = [];
         try {
-          const summary = await getCostLogSummary?.();
-          if (summary) {
-            recentSpendUsd = summary.totalUsd ?? summary.total_usd ?? summary.spend_24h ?? 0;
-            const byModel = summary.byModel || summary.by_model || summary.spend_by_category || {};
-            spendByCategory = Array.isArray(byModel)
-              ? byModel
-              : Object.entries(byModel).map(([category, usd]) => ({ category, usd: Number(usd) }));
+          // Compute spend directly from the shared cost log so "24h" is really
+          // 24h (getCostLogSummary returns an all-time total). Timestamps are
+          // seconds (SDK) or ms (us); normalize to ms.
+          if (fs.existsSync(SHARED_COST_LOG)) {
+            const now = Date.now();
+            const byModel = new Map();
+            for (const line of fs.readFileSync(SHARED_COST_LOG, 'utf8').split('\n')) {
+              if (!line.trim()) continue;
+              let e; try { e = JSON.parse(line); } catch { continue; }
+              const cost = Number(e.cost_usd) || 0;
+              let ts = Number(e.ts) || 0;
+              if (ts > 0 && ts < 1e12) ts *= 1000;
+              totalSpendUsd += cost;
+              if (ts && now - ts <= 24 * 60 * 60 * 1000) recentSpendUsd += cost;
+              const m = e.model || 'unknown';
+              byModel.set(m, (byModel.get(m) || 0) + cost);
+            }
+            spendByCategory = [...byModel.entries()]
+              .map(([category, usd]) => ({ category, usd }))
+              .sort((a, b) => b.usd - a.usd);
           }
         } catch { /* ignore */ }
         try {
           if (privateKey) {
-            // getBalance() lives on LLMClient and resolves to a USDC float.
-            const c = new LLMClient({ privateKey, apiUrl });
+            // getBalance() lives on both LLMClient (Base) and SolanaLLMClient
+            // (Solana) and resolves to a USDC float.
+            const c = chain === 'solana'
+              ? new SolanaLLMClient({ privateKey })
+              : new LLMClient({ privateKey, apiUrl });
             const bal = await c.getBalance();
             if (typeof bal === 'number') balanceUsdc = bal;
           }
         } catch { /* ignore — show 0 if balance lookup fails */ }
-        return json(res, { address, balanceUsdc, recentSpendUsd, network: 'Base', spendByCategory });
+        const network = chain === 'solana' ? 'Solana' : 'Base';
+        return json(res, { address, balanceUsdc, recentSpendUsd, totalSpendUsd, network, chain, spendByCategory });
       } catch (err) {
-        return json(res, { address: '', balanceUsdc: 0, recentSpendUsd: 0, network: 'Base', spendByCategory: [], error: String(err) });
+        const network = chain === 'solana' ? 'Solana' : 'Base';
+        return json(res, { address: '', balanceUsdc: 0, recentSpendUsd: 0, totalSpendUsd: 0, network, chain, spendByCategory: [], error: String(err) });
       }
     }
 
@@ -268,17 +451,33 @@ const server = http.createServer(async (req, res) => {
         const logPath = SHARED_COST_LOG;
         if (!fs.existsSync(logPath)) return json(res, []);
         const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
-        const txs = lines.slice(-100).map((l, i) => {
-          const e = JSON.parse(l);
-          return {
-            id: String(e.ts ?? i),
-            ts: e.ts ?? Date.now(),
-            type: 'spend',
-            amountUsd: e.cost_usd ?? 0,
-            description: e.endpoint || e.client_kind || 'spend',
-            model: e.model,
-          };
-        }).reverse();
+        const txs = lines
+          .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+          .filter(Boolean)
+          // The cost log is SHARED across all BlockRun tools. Show generations
+          // (image/video/music) AND language-model calls (/v1/messages, /v1/chat).
+          .filter((e) => /\/(images|videos|audio)\/|\/(messages|chat)/.test(e.endpoint || ''))
+          .map((e, i) => {
+            // Normalize timestamps: SDK logs seconds (float), we log ms. Anything
+            // below 1e12 is seconds → ×1000.
+            const rawTs = Number(e.ts) || 0;
+            const tsMs = rawTs > 0 ? (rawTs < 1e12 ? Math.round(rawTs * 1000) : rawTs) : Date.now();
+            const ep = e.endpoint || '';
+            const kind = ep.includes('/videos/') ? 'Video'
+                       : ep.includes('/images/') ? 'Image'
+                       : ep.includes('/audio/') ? 'Music'
+                       : /\/(messages|chat)/.test(ep) ? 'Text' : 'Generation';
+            return {
+              id: `${rawTs}-${i}`,
+              ts: tsMs,
+              type: 'spend',
+              amountUsd: e.cost_usd ?? 0,
+              description: `${kind} · ${e.model || ''}`.trim().replace(/·\s*$/, '').trim(),
+              model: e.model,
+            };
+          })
+          .sort((a, b) => b.ts - a.ts)
+          .slice(0, 100);
         return json(res, txs);
       } catch {
         return json(res, []);
@@ -323,6 +522,16 @@ const server = http.createServer(async (req, res) => {
         return json(res, { ok: true, items });
       } catch (err) {
         return json(res, { ok: false, error: err.message || String(err), items: [] }, 502);
+      }
+    }
+
+    if (p === '/api/prompts/detail' && req.method === 'GET') {
+      try {
+        const relPath = new URL(req.url, 'http://x').searchParams.get('path') || '';
+        const detail = await getPromptDetail(relPath);
+        return json(res, { ok: true, ...detail });
+      } catch (err) {
+        return json(res, { ok: false, error: err.message || String(err) }, 502);
       }
     }
 

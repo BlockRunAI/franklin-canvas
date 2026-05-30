@@ -1,4 +1,4 @@
-export type Route = 'chat' | 'canvas' | 'wallet' | 'projects';
+export type Route = 'canvas' | 'wallet' | 'projects';
 
 export interface Message {
   id: string;
@@ -15,11 +15,16 @@ export interface Session {
   updatedAt: number;
 }
 
+export type WalletChain = 'base' | 'solana';
+
 export interface WalletInfo {
   address: string;
   balanceUsdc: number;
   recentSpendUsd: number;
+  totalSpendUsd?: number;
   network: string;
+  /** Settlement chain — present on responses; defaults to 'base' if missing. */
+  chain?: WalletChain;
   spendByCategory: { category: string; usd: number }[];
 }
 

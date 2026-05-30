@@ -10,7 +10,7 @@
 // equivalent is added to the panel server upstream, this client switches
 // over automatically.
 
-import type { Session, WalletInfo, Transaction } from '../types';
+import type { Session, WalletInfo, WalletChain, Transaction } from '../types';
 
 const base = '/api';
 
@@ -30,8 +30,8 @@ export async function listSessions(): Promise<Session[]> {
   }));
 }
 
-export async function getWallet(): Promise<WalletInfo> {
-  const r = await fetch(`${base}/wallet`);
+export async function getWallet(chain: WalletChain = 'base'): Promise<WalletInfo> {
+  const r = await fetch(`${base}/wallet?chain=${chain}`);
   if (!r.ok) throw new Error(`wallet ${r.status}`);
   const raw = await r.json();
   // Panel returns: { address, balanceUsdc, ... } OR { address, balance: {...} }
@@ -40,7 +40,9 @@ export async function getWallet(): Promise<WalletInfo> {
     address: String(raw.address ?? ''),
     balanceUsdc: Number(raw.balanceUsdc ?? raw.balance?.usdc ?? raw.usdc ?? 0),
     recentSpendUsd: Number(raw.recentSpendUsd ?? raw.recent_spend_usd ?? raw.spend_24h ?? 0),
-    network: String(raw.network ?? raw.chain ?? 'Base'),
+    totalSpendUsd: Number(raw.totalSpendUsd ?? raw.total_spend_usd ?? 0),
+    network: String(raw.network ?? (chain === 'solana' ? 'Solana' : 'Base')),
+    chain: (raw.chain as WalletChain) ?? chain,
     spendByCategory: raw.spendByCategory ?? raw.spend_by_category ?? [],
   };
 }
@@ -50,18 +52,33 @@ export interface PromptItem {
   title: string;
   titleCn?: string;
   category: string;
+  workflow?: string;
+  model?: string;
+  tags?: string[];
   prompt: string;
   image?: string;
   needsRef?: boolean;
   source: string;
+  /** Relative path of the case file; the full prompt body is fetched on demand. */
+  path?: string;
 }
 
-// Prompt library — scraped server-side from public GitHub prompt repos.
+// Prompt library catalog — fetched server-side from the BlockRun case library
+// INDEX. Titles + metadata only; the prompt body comes from getPromptDetail.
 export async function listPrompts(): Promise<PromptItem[]> {
   const r = await fetch(`${base}/prompts`);
   if (!r.ok) throw new Error(`prompts ${r.status}`);
   const raw = await r.json();
   return Array.isArray(raw) ? raw : raw.items ?? [];
+}
+
+// Fetch the full prompt body (+ preview image) for one case, on demand.
+export async function getPromptDetail(path: string): Promise<{ prompt: string; image?: string; title?: string }> {
+  const r = await fetch(`${base}/prompts/detail?path=${encodeURIComponent(path)}`);
+  if (!r.ok) throw new Error(`prompt detail ${r.status}`);
+  const raw = await r.json();
+  if (raw?.ok === false) throw new Error(raw.error || 'detail failed');
+  return { prompt: raw.prompt || '', image: raw.image, title: raw.title };
 }
 
 export async function listTransactions(): Promise<Transaction[]> {
