@@ -7,11 +7,14 @@ import { useMemo } from 'react';
 
 export type AspectRatio = '16:9' | '9:16' | '1:1';
 export type Mode = 'standard' | 'pro';
+export type Resolution = '480p' | '720p' | '1080p';
 
 export interface VideoSettings {
   mode: Mode;
   ratio: AspectRatio;
   durationS: number;
+  resolution: Resolution;
+  audio: boolean;
 }
 
 interface Props {
@@ -87,6 +90,15 @@ export default function VideoSettingsPanel({ value, onChange, durations = DEFAUL
       </section>
 
       <section className="panel-row">
+        <div className="panel-row-title">Resolution</div>
+        <Segmented<Resolution>
+          options={['480p', '720p', '1080p']}
+          value={value.resolution}
+          onChange={(v) => onChange({ ...value, resolution: v })}
+        />
+      </section>
+
+      <section className="panel-row">
         <div className="panel-row-title">Duration</div>
         <Segmented<number>
           options={durations}
@@ -94,6 +106,19 @@ export default function VideoSettingsPanel({ value, onChange, durations = DEFAUL
           onChange={(v) => onChange({ ...value, durationS: v })}
           render={(v) => `${v}s`}
         />
+      </section>
+
+      <section className="panel-row panel-row-inline">
+        <div className="panel-row-title">Audio</div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={value.audio}
+          className={`panel-toggle ${value.audio ? 'is-on' : ''}`}
+          onClick={(e) => { e.stopPropagation(); onChange({ ...value, audio: !value.audio }); }}
+        >
+          <span className="panel-toggle-knob" />
+        </button>
       </section>
     </div>
   );

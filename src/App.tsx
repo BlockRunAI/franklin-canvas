@@ -1,39 +1,34 @@
-import { useRef, useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
-import ChatView from './views/ChatView';
 import CanvasView from './views/CanvasView';
-import WalletView from './views/WalletView';
 import ProjectsView from './views/ProjectsView';
 import SettingsDialog from './canvas/SettingsDialog';
-import { useUiStore } from './uiStore';
+import { useThemeStore } from './canvas/themeStore';
 import type { Route } from './types';
 
+type SettingsSection = 'wallet' | 'models' | 'canvas' | 'about';
+
 const TITLES: Record<Route, string> = {
-  chat: 'Chat',
   canvas: 'Canvas',
   projects: 'Projects',
   wallet: 'Wallet',
 };
 
 export default function App() {
-  const [route, setRoute] = useState<Route>('chat');
+  const [route, setRoute] = useState<Route>('canvas');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const setPromptLibOpen = useUiStore((s) => s.setPromptLibOpen);
-  // Track the previous route so re-clicking the active sidebar item bounces
-  // back instead of leaving the user stranded on a view they finished with.
-  const prevRouteRef = useRef<Route>('chat');
-  const navigate = (next: Route) => {
-    if (next === route) {
-      const back = prevRouteRef.current;
-      if (back !== route) {
-        prevRouteRef.current = route;
-        setRoute(back);
-      }
-      return;
-    }
-    prevRouteRef.current = route;
-    setRoute(next);
+  const [settingsInitial, setSettingsInitial] = useState<SettingsSection>('wallet');
+  // Apply the persisted theme on mount (data-theme on <html>).
+  const theme = useThemeStore((s) => s.theme);
+  useEffect(() => {
+    if (theme === 'dark') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  const openSettings = (section: SettingsSection = 'wallet') => {
+    setSettingsInitial(section);
+    setSettingsOpen(true);
   };
 
   return (
@@ -41,18 +36,19 @@ export default function App() {
       <Sidebar
         route={route}
         collapsed={sidebarCollapsed}
-        onNavigate={navigate}
+        onNavigate={setRoute}
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenPrompts={() => { navigate('canvas'); setPromptLibOpen(true); }}
+        onOpenSettings={openSettings}
       />
       <main className="main" aria-label={TITLES[route]}>
-        {route === 'chat' && <ChatView />}
         {route === 'canvas' && <CanvasView />}
-        {route === 'wallet' && <WalletView />}
-        {route === 'projects' && <ProjectsView onOpenCanvas={() => navigate('canvas')} />}
+        {route === 'projects' && <ProjectsView onOpenCanvas={() => setRoute('canvas')} />}
       </main>
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        initial={settingsInitial}
+      />
     </div>
   );
 }

@@ -1,9 +1,9 @@
-// Image-card dropdown menu: Outpaint / Enhance / Cutout / Upscale / Split,
-// plus Erase / Annotate (which need a mask-paint UI we don't have yet, so
-// they stay disabled). Dark glass panel with icon + label rows.
+// Image-card dropdown menu: Outpaint / Enhance / Cutout / Upscale / Split 2×2 /
+// Split 3×3 / Annotate. Erase needs a mask-paint UI we don't have yet — it's
+// in the Notion backlog, not in the menu.
 
 import {
-  Maximize, Eraser, PenLine, Sparkles, Crop, Scissors, Grid3x3,
+  Maximize, PenLine, Sparkles, Crop, Scissors, Grid3x3,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -16,16 +16,16 @@ export interface MenuItem {
 }
 
 // outpaint / enhance / cutout / pixels run as image-to-image generations
-// (see CanvasView.runImageEdit); split crops client-side. erase / annotate
-// need a mask-paint UI we don't have yet, so they stay disabled.
+// (see CanvasView.runImageEdit); split crops client-side; annotate opens a
+// freehand drawing modal then saves a new upload node.
 const DEFAULT_IMAGE_ITEMS: MenuItem[] = [
   { id: 'outpaint',   icon: Maximize,  label: 'Outpaint' },
   { id: 'enhance',    icon: Sparkles,  label: 'Enhance' },
-  { id: 'cutout',     icon: Scissors,  label: 'Cutout (remove bg)' },
+  { id: 'cutout',     icon: Scissors,  label: 'Cutout (transparent bg)' },
   { id: 'pixels',     icon: Crop,      label: 'Upscale' },
-  { id: 'split',      icon: Grid3x3,   label: 'Split 2×2' },
-  { id: 'erase',      icon: Eraser,    label: 'Erase',    disabled: true },
-  { id: 'annotate',   icon: PenLine,   label: 'Annotate', disabled: true },
+  { id: 'split2',     icon: Grid3x3,   label: 'Split 2×2' },
+  { id: 'split3',     icon: Grid3x3,   label: 'Split 3×3' },
+  { id: 'annotate',   icon: PenLine,   label: 'Annotate' },
 ];
 
 interface Props {

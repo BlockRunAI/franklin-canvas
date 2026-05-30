@@ -118,7 +118,7 @@ function ReferencePicker({
           aria-label="Add reference image"
           title="Add reference image"
         >
-          <Plus size={15} aria-hidden />
+          <Plus size={18} strokeWidth={2.5} aria-hidden />
         </button>
       )}
       {open && (
@@ -238,7 +238,7 @@ export default function PromptBar({ onSend }: Props) {
           title="Upload reference from disk"
           onClick={onAttachClick}
         >
-          <Paperclip size={15} aria-hidden />
+          <Paperclip size={22} strokeWidth={2} aria-hidden />
         </button>
         <div className="pb-flex" />
         {bound && selectedNode && (
@@ -284,7 +284,7 @@ export default function PromptBar({ onSend }: Props) {
           aria-label="Send"
           title="Send (Enter)"
         >
-          <ArrowUp size={16} aria-hidden />
+          <ArrowUp size={24} strokeWidth={3} aria-hidden />
         </button>
       </div>
 

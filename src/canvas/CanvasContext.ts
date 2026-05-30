@@ -25,16 +25,23 @@ export interface CanvasCtx {
    */
   runImageEdit: (fromNodeId: string, op: ImageEditOp) => void;
   /**
-   * Split a node's result image into an N×N grid of separate image nodes —
-   * pure client-side cropping (no model call, no spend).
+   * Split a node's result image into a rows×cols grid of separate upload
+   * nodes — pure client-side cropping (no model call, no spend).
    */
-  runImageSplit: (fromNodeId: string, grid: number) => void;
+  runImageSplit: (fromNodeId: string, rows: number, cols: number) => void;
+  /**
+   * Open the in-canvas annotate modal so the user can draw freehand strokes
+   * over the source image, then save the result as a new upload node next to
+   * the source. Pure client-side, no model call, no spend.
+   */
+  runAnnotate: (fromNodeId: string) => void;
 }
 
 export const CanvasContext = createContext<CanvasCtx>({
   openConnectMenu: () => {},
   runImageEdit: () => {},
   runImageSplit: () => {},
+  runAnnotate: () => {},
 });
 
 export const useCanvasCtx = () => useContext(CanvasContext);

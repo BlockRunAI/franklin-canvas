@@ -10,7 +10,8 @@ import {
 import { getWallet } from '../api/franklin';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, TEXT_MODELS } from './nodes';
 import { usePrefsStore, type EdgeStyle } from './prefsStore';
-import type { WalletInfo } from '../types';
+import { useThemeStore, type Theme } from './themeStore';
+import type { WalletInfo, WalletChain } from '../types';
 
 type SectionId = 'wallet' | 'models' | 'canvas' | 'about';
 
@@ -30,15 +31,22 @@ interface Props {
 }
 
 function WalletPane() {
+  const [chain, setChain] = useState<WalletChain>('base');
   const [w, setW] = useState<WalletInfo | null>(null);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Refetch whenever the chain switch changes.
   useEffect(() => {
     let cancelled = false;
-    getWallet().then((res) => { if (!cancelled) setW(res); }).catch(() => { if (!cancelled) setErr(true); });
+    setLoading(true);
+    setErr(false);
+    getWallet(chain)
+      .then((res) => { if (!cancelled) { setW(res); setLoading(false); } })
+      .catch(() => { if (!cancelled) { setErr(true); setLoading(false); } });
     return () => { cancelled = true; };
-  }, []);
+  }, [chain]);
 
   const copy = () => {
     if (!w?.address) return;
@@ -47,14 +55,60 @@ function WalletPane() {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  if (err) return <div className="settings-stub"><h2>Wallet</h2><p>Couldn't reach the Franklin daemon. Is it running on :3100?</p></div>;
-  if (!w) return <div className="settings-stub"><h2>Wallet</h2><p>Loading wallet…</p></div>;
+  const chainOptions: { id: WalletChain; label: string; hint: string }[] = [
+    { id: 'base', label: 'Base', hint: 'USDC on Base (EVM)' },
+    { id: 'solana', label: 'Solana', hint: 'USDC on Solana' },
+  ];
+
+  const chainSwitch = (
+    <div className="wallet-chain-switch" role="tablist" aria-label="Settlement chain">
+      {chainOptions.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          role="tab"
+          aria-selected={chain === o.id}
+          className={`wallet-chain-tab ${chain === o.id ? 'is-active' : ''}`}
+          onClick={() => setChain(o.id)}
+          title={o.hint}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (err) return (
+    <div className="settings-pane-section">
+      <h2>Wallet</h2>
+      {chainSwitch}
+      <p className="settings-foot-note">Couldn't reach the Franklin daemon. Is it running on :3100?</p>
+    </div>
+  );
+  if (loading || !w) return (
+    <div className="settings-pane-section">
+      <h2>Wallet</h2>
+      {chainSwitch}
+      <p className="settings-foot-note">Loading {chain === 'solana' ? 'Solana' : 'Base'} wallet…</p>
+    </div>
+  );
 
   const short = w.address ? `${w.address.slice(0, 6)}…${w.address.slice(-4)}` : '—';
+  const isEmpty = !w.address;
 
   return (
     <div className="settings-pane-section">
       <h2>Wallet</h2>
+      {chainSwitch}
+      {isEmpty ? (
+        <p className="settings-foot-note">
+          No {chain === 'solana' ? 'Solana' : 'Base'} wallet configured. Set{' '}
+          <code>{chain === 'solana' ? 'SOLANA_WALLET_KEY' : 'BLOCKRUN_WALLET_KEY'}</code>{' '}
+          in your env, or save a key to{' '}
+          <code>{chain === 'solana' ? '~/.blockrun/solana-wallet' : '~/.blockrun/wallet'}</code>.
+        </p>
+      ) : (
+      <>
       <div className="settings-balance">
         <span className="settings-balance-num">${w.balanceUsdc.toFixed(2)}</span>
         <span className="settings-balance-unit">USDC on {w.network}</span>
@@ -70,6 +124,9 @@ function WalletPane() {
           </dd>
         </div>
         <div><dt>Spent (24h)</dt><dd>${w.recentSpendUsd.toFixed(2)}</dd></div>
+        {typeof w.totalSpendUsd === 'number' && w.totalSpendUsd > 0 && (
+          <div><dt>Spent (all-time, shared wallet)</dt><dd>${w.totalSpendUsd.toFixed(2)}</dd></div>
+        )}
       </dl>
       {w.spendByCategory?.length > 0 && (
         <>
@@ -84,7 +141,12 @@ function WalletPane() {
           </ul>
         </>
       )}
-      <p className="settings-foot-note">Top up by sending USDC on Base to the address above. Every generation is paid live per call — no subscription.</p>
+      <p className="settings-foot-note">
+        Top up by sending USDC on {w.network} to the address above. Every
+        generation is paid live per call — no subscription.
+      </p>
+      </>
+      )}
     </div>
   );
 }
@@ -120,17 +182,43 @@ function ModelsPane() {
 function CanvasPane() {
   const edgeStyle = usePrefsStore((s) => s.edgeStyle);
   const setEdgeStyle = usePrefsStore((s) => s.setEdgeStyle);
-  const options: { id: EdgeStyle; label: string; hint: string }[] = [
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
+
+  const themeOptions: { id: Theme; label: string; hint: string }[] = [
+    { id: 'dark',  label: 'Dark',  hint: 'Neutral zinc dark with the lime gradient accent.' },
+    { id: 'gold',  label: 'Gold',  hint: 'Warm cream + petrol-ink with a gold thread.' },
+    { id: 'light', label: 'Light', hint: 'Cool minimal white with petrol accent.' },
+  ];
+
+  const edgeOptions: { id: EdgeStyle; label: string; hint: string }[] = [
     { id: 'animated', label: 'Animated', hint: 'A light pulse flows along each connection (lively).' },
-    { id: 'solid', label: 'Solid', hint: 'A static lime gradient — calm, still on-brand.' },
+    { id: 'solid', label: 'Solid', hint: 'A static gradient — calm, still on-brand.' },
     { id: 'subtle', label: 'Subtle', hint: 'A thin neutral line — minimal, no gradient.' },
   ];
+
   return (
     <div className="settings-pane-section">
       <h2>Canvas</h2>
+
+      <h3 className="settings-subhead">Theme</h3>
+      <div className="settings-choices">
+        {themeOptions.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            className={`settings-choice ${theme === o.id ? 'is-active' : ''}`}
+            onClick={() => setTheme(o.id)}
+          >
+            <span className="settings-choice-label">{o.label}</span>
+            <span className="settings-choice-hint">{o.hint}</span>
+          </button>
+        ))}
+      </div>
+
       <h3 className="settings-subhead">Connection lines</h3>
       <div className="settings-choices">
-        {options.map((o) => (
+        {edgeOptions.map((o) => (
           <button
             key={o.id}
             type="button"
@@ -142,7 +230,8 @@ function CanvasPane() {
           </button>
         ))}
       </div>
-      <p className="settings-foot-note">Applies to every connection on the canvas, instantly.</p>
+
+      <p className="settings-foot-note">Theme + connection style apply instantly across the canvas.</p>
     </div>
   );
 }
@@ -157,14 +246,23 @@ function AboutPane() {
       </p>
       <dl className="settings-kv">
         <div><dt>Version</dt><dd>0.0.1</dd></div>
-        <div><dt>Gateway</dt><dd>BlockRun (Base · x402)</dd></div>
+        <div><dt>Gateway</dt><dd>BlockRun · x402 on Base &amp; Solana</dd></div>
       </dl>
+      <h3 className="settings-subhead">Credits</h3>
+      <p className="settings-foot-note">
+        The Prompt Library inside the canvas is sourced from the open BlockRunAI
+        case-library on GitHub. Each card lazy-loads from the upstream repo; credit
+        goes to the original prompt authors.
+      </p>
       <div className="settings-links">
         <a href="https://github.com/BlockRunAI/franklin-canvas" target="_blank" rel="noopener noreferrer">
           Repository <ExternalLink size={12} aria-hidden />
         </a>
         <a href="https://github.com/BlockRunAI/Franklin" target="_blank" rel="noopener noreferrer">
           Franklin core <ExternalLink size={12} aria-hidden />
+        </a>
+        <a href="https://github.com/BlockRunAI/Claude-Code-GPT-IMAGE2-SeeDance-BlockRun" target="_blank" rel="noopener noreferrer">
+          Prompt library source <ExternalLink size={12} aria-hidden />
         </a>
       </div>
     </div>

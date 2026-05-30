@@ -1,11 +1,20 @@
-import { MessageSquare, Workflow, LayoutGrid, Wallet as WalletIcon, Settings, Sparkles, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+// Primary left navigation rail. Brand (Franklin Canvas) at top, Canvas /
+// Projects nav in the middle, Wallet + Settings in the footer (both open the
+// SettingsDialog on the relevant pane). Collapsible via the chevron button —
+// width animates between expanded (240px) and collapsed (56px); labels fade.
+
+import {
+  Workflow, LayoutGrid, Wallet as WalletIcon, Settings, Sparkles,
+  PanelLeftClose, PanelLeftOpen,
+} from 'lucide-react';
 import type { Route } from '../types';
 
-const ITEMS: { id: Route; label: string; Icon: typeof MessageSquare }[] = [
-  { id: 'chat', label: 'Chat', Icon: MessageSquare },
+type SettingsSection = 'wallet' | 'models' | 'canvas' | 'about';
+
+interface NavItem { id: Route; label: string; Icon: typeof Workflow; }
+const ITEMS: NavItem[] = [
   { id: 'canvas', label: 'Canvas', Icon: Workflow },
   { id: 'projects', label: 'Projects', Icon: LayoutGrid },
-  { id: 'wallet', label: 'Wallet', Icon: WalletIcon },
 ];
 
 interface Props {
@@ -13,11 +22,10 @@ interface Props {
   collapsed?: boolean;
   onNavigate: (r: Route) => void;
   onToggleCollapse?: () => void;
-  onOpenSettings?: () => void;
-  onOpenPrompts?: () => void;
+  onOpenSettings?: (section?: SettingsSection) => void;
 }
 
-export default function Sidebar({ route, collapsed = false, onNavigate, onToggleCollapse, onOpenSettings, onOpenPrompts }: Props) {
+export default function Sidebar({ route, collapsed = false, onNavigate, onToggleCollapse, onOpenSettings }: Props) {
   return (
     <nav
       className={`sidebar ${collapsed ? 'is-collapsed' : ''}`}
@@ -26,7 +34,7 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark">
           <Sparkles size={18} className="brand-icon" aria-hidden />
-          {!collapsed && <span>Franklin Canvas</span>}
+          <span>Franklin Canvas</span>
         </span>
         {onToggleCollapse && (
           <button
@@ -51,33 +59,31 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
               title={collapsed ? label : undefined}
             >
               <Icon size={16} strokeWidth={1.75} aria-hidden />
-              {!collapsed && <span>{label}</span>}
+              <span>{label}</span>
             </button>
           </li>
         ))}
-        <li>
-          <button
-            className="nav-item"
-            onClick={onOpenPrompts}
-            aria-label="Open prompt library"
-            title={collapsed ? 'Prompts' : undefined}
-          >
-            <Sparkles size={16} strokeWidth={1.75} aria-hidden />
-            {!collapsed && <span>Prompts</span>}
-          </button>
-        </li>
       </ul>
       <div className="sidebar-footer">
         <button
           className="nav-item"
-          onClick={onOpenSettings}
+          onClick={() => onOpenSettings?.('wallet')}
+          aria-label="Open wallet"
+          title={collapsed ? 'Wallet' : undefined}
+        >
+          <WalletIcon size={16} strokeWidth={1.75} aria-hidden />
+          <span>Wallet</span>
+        </button>
+        <button
+          className="nav-item"
+          onClick={() => onOpenSettings?.('canvas')}
           aria-label="Open settings"
           title={collapsed ? 'Settings' : undefined}
         >
           <Settings size={16} strokeWidth={1.75} aria-hidden />
-          {!collapsed && <span>Settings</span>}
+          <span>Settings</span>
         </button>
-        {!collapsed && <div className="version" aria-hidden>franklin-canvas · v0.0.1</div>}
+        <div className="version" aria-hidden>franklin-canvas · v0.0.1</div>
       </div>
     </nav>
   );

@@ -29,6 +29,52 @@
   --radius-pill: 999px;
 }
 
+/* ── Theme: gold (warm cream + petrol-ink + gold thread) ── */
+:root[data-theme="gold"] {
+  --bg: #f4f1ea;
+  --bg-elevated: #ffffff;
+  --bg-card: #ffffff;
+  --bg-hover: rgba(10, 10, 10, 0.04);
+  --fg: #0a0a0a;
+  --fg-dim: #5f5a4d;
+  --fg-faint: #8f8775;
+  --accent: #c9a227;
+  --accent-dim: #8c6f17;
+  --accent-bg: rgba(201, 162, 39, 0.12);
+  --accent-ring: rgba(201, 162, 39, 0.45);
+  --accent-gradient: linear-gradient(135deg, #c9a227 0%, #d8be58 100%);
+  --accent-gradient-soft: linear-gradient(135deg, rgba(201, 162, 39, 0.18) 0%, rgba(27, 45, 54, 0.10) 100%);
+  --border: #e7e3da;
+  --border-strong: #d8d2c6;
+  --user-bubble: #ffffff;
+  --shadow-sm: 0 1px 2px rgba(10, 10, 10, 0.06), 0 1px 1px rgba(10, 10, 10, 0.04);
+  --shadow-md: 0 4px 14px rgba(10, 10, 10, 0.08), 0 2px 4px rgba(10, 10, 10, 0.04);
+  --shadow-lg: 0 16px 36px rgba(10, 10, 10, 0.10), 0 6px 12px rgba(10, 10, 10, 0.06);
+}
+
+/* ── Theme: light (cool minimal white) ── */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-elevated: #fafafa;
+  --bg-card: #ffffff;
+  --bg-hover: #f4f4f5;
+  --fg: #111111;
+  --fg-dim: #565656;
+  --fg-faint: #8a8a8a;
+  --accent: #1b2d36;
+  --accent-dim: #294450;
+  --accent-bg: rgba(27, 45, 54, 0.08);
+  --accent-ring: rgba(27, 45, 54, 0.30);
+  --accent-gradient: linear-gradient(135deg, #1b2d36 0%, #294450 100%);
+  --accent-gradient-soft: linear-gradient(135deg, rgba(27, 45, 54, 0.10) 0%, rgba(27, 45, 54, 0.05) 100%);
+  --border: #ebebe9;
+  --border-strong: #dadad7;
+  --user-bubble: #f4f4f5;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.12);
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* Visible focus ring for keyboard users only */
@@ -437,7 +483,7 @@ a:hover { text-decoration: underline; }
   padding: 6px 14px;
 }
 .btn-run:hover:not(:disabled) { background: var(--accent-dim); border-color: var(--accent-dim); }
-.canvas-flow { flex: 1; background: #07070a; }
+.canvas-flow { flex: 1; background: var(--bg); }
 
 /* React Flow theme overrides */
 .react-flow__node { padding: 0; border: none; background: transparent; box-shadow: none; }
@@ -459,7 +505,7 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border);
   border-radius: 6px;
 }
-.react-flow__background { background: #07070a; }
+.react-flow__background { background: var(--bg); }
 
 /* Custom canvas nodes */
 .canvas-node {
@@ -661,20 +707,20 @@ a:hover { text-decoration: underline; }
 .node-title-check { color: var(--accent); flex-shrink: 0; }
 
 /* ── NodeFrame: floating pill toolbar ── */
+/* Transparent layout wrapper — the visible pill is .node-toolbar-pill-row.
+   (Keeping a background here too would double-nest the toolbar.) */
 .node-toolbar-pill {
   display: flex !important;
+  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 4px;
-  height: 44px;
-  border-radius: 999px;
-  background: rgba(20, 20, 22, 0.85);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 8px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  height: auto;
   color: rgba(255, 255, 255, 0.85);
   white-space: nowrap;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 .toolbar-group {
   display: flex;
@@ -1260,49 +1306,137 @@ button:active:not(:disabled) { transform: scale(0.97); }
 /* ── Layout ── */
 .app { display: flex; height: 100%; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-.canvas-host { display: flex; flex-direction: column; height: 100%; }
-.canvas-body { flex: 1; position: relative; overflow: hidden; }
+.canvas-host { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.canvas-body { flex: 1; position: relative; overflow: hidden; min-width: 0; }
 .canvas-flow { position: absolute; inset: 0; }
 .canvas-flow .react-flow { width: 100%; height: 100%; }
 
-/* ── Canvas toolbar ── */
+/* ── Canvas left rail (vertical tool palette) ──
+   The full canvas tool palette lives in a slim vertical rail on the left of
+   the canvas body: project name → add-node sections grouped by category →
+   Prompts → wallet readout. Each button stacks an icon over a small label so
+   the function is discoverable in the narrow column. */
+.canvas-rail {
+  width: 96px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--border);
+  background: rgba(20, 20, 23, 0.72);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  overflow-y: auto;
+  z-index: 5;
+}
+.canvas-rail-brand {
+  font-size: 11.5px; font-weight: 600; color: var(--fg); letter-spacing: 0.2px;
+  width: 100%; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid transparent; background: transparent; outline: none;
+  text-align: center;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+.canvas-rail-brand:hover { background: var(--bg-hover); }
+.canvas-rail-brand:focus { background: var(--bg-card); border-color: var(--accent-ring); text-align: left; }
+.canvas-rail-divider {
+  height: 1px; width: calc(100% - 16px); margin: 6px auto;
+  background: rgba(255,255,255,0.08);
+}
+.canvas-rail-section { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.canvas-rail-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  width: 100%; padding: 8px 4px;
+  border: 0; background: transparent; color: var(--fg-dim);
+  font-size: 10.5px; font-weight: 500; border-radius: 10px; cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, transform 0.14s ease;
+  position: relative;
+}
+.canvas-rail-btn:hover { background: var(--bg-hover); color: var(--fg); transform: translateY(-1px); }
+.canvas-rail-btn svg { color: var(--accent); flex-shrink: 0; }
+.canvas-rail-btn-label { white-space: nowrap; line-height: 1.1; }
+.canvas-rail-beta {
+  position: absolute; top: 2px; right: 4px;
+  font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #f5c378; background: rgba(245,195,120,0.10); border: 1px solid rgba(245,195,120,0.28);
+  border-radius: 999px; padding: 1px 4px;
+}
+.canvas-rail-spacer { flex: 1; min-height: 8px; }
+.canvas-rail-wallet {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 6px 4px; color: var(--fg-dim); font-size: 10px;
+}
+.canvas-rail-wallet strong {
+  color: var(--accent); font-size: 13px; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.canvas-rail-wallet-label {
+  color: var(--fg-faint); font-size: 9px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+
+/* Wallet pill in the top toolbar — clickable, opens Settings → Wallet. */
+.canvas-wallet-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 6px 12px; border-radius: 999px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  color: var(--fg-dim); font-size: 12.5px; cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.canvas-wallet-btn:hover { background: var(--bg-hover); color: var(--fg); border-color: var(--accent-ring); }
+.canvas-wallet-btn strong { color: var(--accent); font-weight: 600; margin-left: 2px; }
+
+/* ── Top toolbar ──
+   Uses var(--bg-elevated) so it matches the Sidebar background in every
+   theme (the previous hardcoded dark glass left light/gold themes with a
+   black bar above a cream sidebar). */
 .canvas-toolbar {
   border-bottom: 1px solid var(--border);
   padding: 11px 20px;
   display: flex;
   align-items: center;
   gap: 14px;
-  background: rgba(20, 20, 23, 0.72);
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  background: var(--bg-elevated);
 }
-.canvas-brand { font-size: 13px; font-weight: 600; color: var(--fg); letter-spacing: 0.2px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-brand-input {
+  font-size: 13px; font-weight: 600; color: var(--fg); letter-spacing: 0.2px;
+  max-width: 220px; min-width: 80px; width: 160px;
+  padding: 4px 8px; border-radius: 8px;
+  border: 1px solid transparent; background: transparent; outline: none;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+.canvas-brand-input:hover { background: var(--bg-hover); }
+.canvas-brand-input:focus { background: var(--bg-card); border-color: var(--accent-ring); }
 .canvas-toolbar-divider { width: 1px; height: 18px; background: rgba(255,255,255,0.10); margin: 0 2px; }
 .canvas-toolbar-spacer { flex: 1; }
-.btn-drawer-toggle {
-  width: 30px; height: 30px; padding: 0; border-radius: 9px;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: transparent; border: 1px solid transparent; color: var(--fg-dim);
-}
-.btn-drawer-toggle:hover { background: var(--bg-hover); color: var(--fg); }
-.canvas-cost { color: var(--fg-dim); font-size: 13px; font-variant-numeric: tabular-nums; }
-.canvas-cost strong { color: var(--accent); margin-left: 4px; }
-.canvas-cost-unit { color: var(--fg-faint); font-size: 11px; margin-left: 2px; }
 .canvas-add-row { display: flex; align-items: center; gap: 2px; list-style: none; padding: 0; margin: 0; }
+.canvas-add-row li { list-style: none; }
 .canvas-add-group-sep { width: 1px; align-self: stretch; margin: 4px 6px; background: var(--border); }
 .canvas-add-btn {
   display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
   border: 0; background: transparent; color: var(--fg-dim);
   font-size: 12.5px; font-weight: 500; border-radius: 8px; cursor: pointer;
-  transition: all 0.14s ease; white-space: nowrap;
+  transition: background-color 0.14s ease, color 0.14s ease, transform 0.14s ease;
+  white-space: nowrap;
 }
-.canvas-add-btn:hover { background: var(--bg-hover); color: var(--fg); }
+.canvas-add-btn:hover { background: var(--bg-hover); color: var(--fg); transform: translateY(-1px); }
 .canvas-add-btn svg { color: var(--accent); flex-shrink: 0; }
 .canvas-add-beta {
   font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
   color: #f5c378; background: rgba(245,195,120,0.10); border: 1px solid rgba(245,195,120,0.28);
   border-radius: 999px; padding: 1px 5px; margin-left: 2px;
 }
+.canvas-cost-unit { color: var(--fg-faint); font-size: 11px; margin-left: 2px; }
+
+/* legacy top-bar classes kept as no-ops in case anything else references them */
+.btn-drawer-toggle {
+  width: 30px; height: 30px; padding: 0; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent; color: var(--fg-dim);
+}
+.btn-drawer-toggle:hover { background: var(--bg-hover); color: var(--fg); }
 
 /* ── Node card wrap + handles ── */
 .canvas-card-wrap { position: relative; display: flex; flex-direction: column; align-items: stretch; width: max-content; }
@@ -1357,7 +1491,7 @@ button:active:not(:disabled) { transform: scale(0.97); }
 /* "+" side buttons */
 .node-add-side {
   position: absolute; top: 50%; transform: translateY(-50%); z-index: 20;
-  width: 22px; height: 22px; min-width: 22px; padding: 0; border-radius: 50%;
+  width: 26px; height: 26px; min-width: 26px; padding: 0; border-radius: 50%;
   border: 1.5px solid rgba(255,255,255,0.35); background: transparent; color: rgba(255,255,255,0.85);
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0.65;
   transition: opacity 0.16s ease, transform 0.16s ease, background 0.14s ease, border-color 0.14s ease;
@@ -1468,6 +1602,11 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .ratio-box { border: 1.5px solid currentColor; border-radius: 2px; }
 .ratio-label { font-size: 12px; }
 .lyrics-area { width: 100%; padding: 8px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 12.5px; resize: vertical; }
+.panel-row-inline { flex-direction: row; align-items: center; justify-content: space-between; }
+.panel-toggle { width: 38px; height: 22px; border-radius: 999px; border: 0; padding: 0; background: rgba(255,255,255,0.18); position: relative; cursor: pointer; transition: background 0.14s ease; flex-shrink: 0; }
+.panel-toggle.is-on { background: var(--accent); }
+.panel-toggle-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 0.14s ease; }
+.panel-toggle.is-on .panel-toggle-knob { transform: translateX(16px); }
 
 /* ── Connect menu (drag-from-handle) extra ── */
 .connect-menu {
@@ -1504,7 +1643,8 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .prompt-bar-input::placeholder { color: var(--fg-faint); }
 .pb-flex { flex: 1; }
 .pb-divider { width: 1px; height: 18px; background: rgba(255,255,255,0.1); margin: 0 2px; }
-.pb-icon-btn { width: 30px; height: 30px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.78); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.pb-icon-btn { width: 38px; height: 38px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.78); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.pb-icon-btn svg { width: 22px; height: 22px; }
 .pb-icon-btn:hover { color: #fff; }
 .pb-mode { display: inline-flex; }
 .pb-mode-btn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; font-size: 12.5px; color: var(--fg-dim); }
@@ -1513,7 +1653,8 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .pb-cost { display: inline-flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
 .pb-cost-symbol { font-size: 10px; color: var(--fg-faint); }
 .pb-cost-n { font-size: 13px; color: var(--fg); }
-.pb-send { width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--accent-gradient); color: #0c0c0d; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.14s ease; box-shadow: 0 2px 10px rgba(163,230,53,0.3); }
+.pb-send { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--accent-gradient); color: #0c0c0d; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.14s ease; box-shadow: 0 2px 10px rgba(163,230,53,0.3); }
+.pb-send svg { width: 24px; height: 24px; }
 .pb-send:hover:not(:disabled) { transform: scale(1.06); filter: brightness(1.08); box-shadow: 0 4px 16px rgba(163,230,53,0.5); }
 .pb-send:disabled { background: rgba(255,255,255,0.12); color: var(--fg-faint); cursor: not-allowed; }
 .pb-ref-picker { position: relative; }
@@ -1600,8 +1741,77 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .prompt-cat { flex-shrink: 0; padding: 5px 12px; font-size: 12px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--bg-card); color: var(--fg-dim); white-space: nowrap; }
 .prompt-cat:hover { color: var(--fg); border-color: var(--border-strong); }
 .prompt-cat.is-active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+.prompt-cat-count { margin-left: 4px; font-size: 10px; color: var(--fg-faint); }
+.prompt-cat.is-active .prompt-cat-count { color: var(--accent); opacity: 0.75; }
+.prompt-lib-wf .prompt-cat { font-weight: 600; }
+.prompt-lib-tags { padding-top: 8px; padding-bottom: 10px; border-top: 1px dashed var(--border); }
+.prompt-cat-tag { font-size: 11.5px; padding: 4px 10px; }
 .prompt-lib-body { flex: 1; overflow-y: auto; padding: 16px; }
 .prompt-lib-empty { padding: 60px 20px; text-align: center; color: var(--fg-faint); font-size: 13px; }
+
+/* ── Annotate modal — pen-on-image canvas for the "Annotate" image action. */
+.annotate-modal {
+  width: min(1100px, 94vw); height: min(86vh, 820px);
+  display: flex; flex-direction: column;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.annotate-head {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+}
+.annotate-title { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 650; color: var(--fg); }
+.annotate-title svg { color: var(--accent); }
+.annotate-tools { flex: 1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.annotate-tool-group { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 999px; background: var(--bg-card); border: 1px solid var(--border); }
+.annotate-color {
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent;
+  padding: 0; cursor: pointer; transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.annotate-color:hover { transform: scale(1.1); }
+.annotate-color.is-active { border-color: var(--fg); }
+.annotate-size {
+  width: 28px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; background: transparent; color: var(--fg-dim);
+  border-radius: 6px; cursor: pointer;
+}
+.annotate-size span { display: inline-block; border-radius: 50%; background: currentColor; }
+.annotate-size:hover { background: var(--bg-hover); color: var(--fg); }
+.annotate-size.is-active { background: var(--bg-card); color: var(--accent); border-color: var(--accent-ring); }
+.annotate-action {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--bg-card); color: var(--fg-dim); cursor: pointer;
+}
+.annotate-action:hover:not(:disabled) { background: var(--bg-hover); color: var(--fg); }
+.annotate-action:disabled { opacity: 0.4; cursor: not-allowed; }
+.annotate-head-end { display: inline-flex; align-items: center; gap: 8px; }
+.annotate-save { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 12.5px; }
+.annotate-stage {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  background: repeating-conic-gradient(#1a1a1d 0% 25%, #141417 0% 50%) 50% / 18px 18px;
+  padding: 16px; overflow: auto;
+}
+.annotate-canvas {
+  max-width: 100%; max-height: 100%;
+  background: #fff;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+  cursor: crosshair; touch-action: none;
+}
+
+/* ── Result node action footer — download / copy buttons. */
+.node-result-actions {
+  display: flex; gap: 6px; padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+}
+.node-result-action {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; font-size: 11.5px; font-weight: 500;
+  color: var(--fg-dim); background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.node-result-action:hover { color: var(--fg); background: var(--bg-hover); border-color: var(--accent-ring); }
 .prompt-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
 .prompt-card { display: flex; flex-direction: column; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-card); overflow: hidden; transition: border-color 0.14s ease, box-shadow 0.14s ease; }
 .prompt-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
@@ -1616,13 +1826,59 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .prompt-card-btns button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; font-size: 11.5px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--bg-hover); color: var(--fg-dim); }
 .prompt-card-btns button:hover { color: var(--fg); border-color: var(--border-strong); }
 .prompt-card-use:hover { border-color: var(--accent) !important; color: var(--accent) !important; }
+.prompt-card-cover-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--fg-faint); background: linear-gradient(135deg, rgba(163,230,53,0.05), rgba(74,222,128,0.03)); }
+.prompt-card-text-loading { color: var(--fg-faint); font-style: italic; }
+.prompt-card-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.prompt-tag { font-size: 10px; padding: 2px 7px; border-radius: 999px; background: var(--bg-hover); color: var(--fg-dim); border: 1px solid var(--border); }
+.prompt-tag-wf { background: var(--accent-bg); color: var(--accent); border-color: transparent; }
 
 /* ── Projects board ── */
 .projects-host { flex: 1; overflow-y: auto; padding: 28px 32px 40px; }
-.projects-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.projects-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 24px; }
+.projects-head-text { flex: 1; min-width: 0; }
 .projects-head h1 { font-size: 22px; font-weight: 650; color: var(--fg); margin: 0 0 4px; }
 .projects-head p { color: var(--fg-dim); font-size: 13px; margin: 0; }
 .projects-new { flex-shrink: 0; }
+.projects-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 999px;
+  background: var(--bg-card); border: 1px solid var(--border); color: var(--fg-dim);
+  font-size: 12.5px; font-weight: 500; cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+  flex-shrink: 0; margin-top: 2px;
+}
+.projects-back:hover { background: var(--bg-hover); color: var(--fg); border-color: var(--accent-ring); }
+.projects-back svg { color: var(--accent); }
+
+/* ── Wallet chain switch (Base / Solana) inside Settings → Wallet ── */
+.wallet-chain-switch {
+  display: inline-flex; padding: 3px; gap: 2px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 999px; margin: -4px 0 14px;
+}
+.wallet-chain-tab {
+  padding: 6px 14px; border-radius: 999px;
+  background: transparent; border: 0; color: var(--fg-dim);
+  font-size: 12.5px; font-weight: 500; cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+.wallet-chain-tab:hover { color: var(--fg); }
+.wallet-chain-tab.is-active {
+  background: var(--bg-elevated); color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+
+/* ── Prompt library attribution footer ── */
+.prompt-lib-foot {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-faint); font-size: 11.5px; line-height: 1.5;
+}
+.prompt-lib-foot a {
+  color: var(--fg-dim); text-decoration: none; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.prompt-lib-foot a:hover { color: var(--accent); }
 .projects-empty { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 80px 20px; color: var(--fg-faint); }
 .projects-empty p { font-size: 14px; margin: 0; }
 .projects-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
@@ -1667,10 +1923,51 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .timeline-foot { font-size: 11px; color: var(--fg-faint); padding: 2px 2px 0; }
 
 /* ── Sidebar polish (active rail + brand row + collapse) ── */
+/* Smooth width + content transitions when collapsing/expanding the sidebar. */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
 .sidebar.is-collapsed { width: 56px; }
+.sidebar-brand-mark span, .nav-item span, .version {
+  white-space: nowrap;
+  transition: opacity 0.18s ease;
+}
+.sidebar.is-collapsed .sidebar-brand-mark span,
+.sidebar.is-collapsed .nav-item span,
+.sidebar.is-collapsed .version { opacity: 0; }
+.nav-item, .sidebar-collapse, .sidebar-rail-item, .canvas-add-btn, .btn-drawer-toggle {
+  transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.14s ease;
+}
+
+/* Main view fade on route change */
+.main > * {
+  animation: view-in 0.22s ease-out both;
+}
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Modal / dialog open animation */
+.settings-overlay { animation: overlay-in 0.16s ease-out; }
+.settings-dialog, .prompt-lib, .annotate-modal, .action-menu, .video-settings-panel, .lyrics-panel, .timeline-picker, .connect-menu, .model-dropdown-menu, .pb-ref-menu, .lightbox-stage {
+  animation: dialog-in 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Buttons get a subtle lift on hover for affordance */
+.canvas-add-btn:hover, .btn-drawer-toggle:hover { transform: translateY(-1px); }
+/* When collapsed, hide the brand mark and keep the toggle (now showing the
+   expand icon) centered — otherwise there's no way to expand again. */
 .sidebar.is-collapsed .sidebar-brand { justify-content: center; }
-.sidebar.is-collapsed .sidebar-brand-mark span { display: none; }
-.sidebar.is-collapsed .sidebar-collapse { display: none; }
+.sidebar.is-collapsed .sidebar-brand-mark { display: none; }
 .sidebar.is-collapsed .nav-item { justify-content: center; }
 .nav-item { border-radius: 10px; position: relative; }
 .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 3px; height: 16px; border-radius: 999px; background: var(--accent); }

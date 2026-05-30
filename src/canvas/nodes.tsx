@@ -3,7 +3,7 @@
 
 import { Handle, NodeResizer, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { useEffect, useState, useRef } from 'react';
-import { Upload, ImageIcon, Film, MessageSquare, Sparkles, Frame, Upload as ReplaceIcon, Loader2, Music, X, Plus, ListVideo, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Upload, ImageIcon, Film, Type, SquareDashed, Target, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus, ChevronLeft, ChevronRight, Download, Copy, Check } from 'lucide-react';
 import NodeFrame from './NodeFrame';
 import NodeActionMenu from './NodeActionMenu';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
@@ -151,7 +151,7 @@ function AddSideButton({ id, side = 'right' }: { id: string; side?: 'left' | 'ri
         openConnectMenu(id, anchorX, r.top + r.height / 2, side);
       }}
     >
-      <Plus size={16} strokeWidth={2.5} aria-hidden />
+      <Plus size={18} strokeWidth={2.75} aria-hidden />
     </button>
   );
 }
@@ -255,7 +255,7 @@ export function ImageGenNode({ data, id }: NodeProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { updateNodeData, getNodes } = useReactFlow();
-  const { runImageEdit, runImageSplit } = useCanvasCtx();
+  const { runImageEdit, runImageSplit, runAnnotate } = useCanvasCtx();
   const navLightbox = (dir: 1 | -1) => {
     const peers = getNodes().filter((n) => n.type === 'imagegen' && (n.data as GenNodeData)?.resultUrl);
     if (peers.length < 2) return;
@@ -293,8 +293,12 @@ export function ImageGenNode({ data, id }: NodeProps) {
               setMenuOpen(false);
               if (['outpaint', 'enhance', 'cutout', 'pixels'].includes(item.id)) {
                 runImageEdit(id, item.id as 'outpaint' | 'enhance' | 'cutout' | 'pixels');
-              } else if (item.id === 'split') {
-                runImageSplit(id, 2);
+              } else if (item.id === 'split2') {
+                runImageSplit(id, 2, 2);
+              } else if (item.id === 'split3') {
+                runImageSplit(id, 3, 3);
+              } else if (item.id === 'annotate') {
+                runAnnotate(id);
               }
             }}
           />
@@ -437,7 +441,7 @@ function VideoCard({
 
 export function VideoGenNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
-  const d = data as GenNodeData & { title?: string; ratio?: AspectRatio; mode?: 'standard' | 'pro' };
+  const d = data as GenNodeData & { title?: string; ratio?: AspectRatio; mode?: 'standard' | 'pro'; resolution?: '480p' | '720p' | '1080p'; audio?: boolean };
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const { getNodes, updateNodeData } = useReactFlow();
@@ -452,6 +456,8 @@ export function VideoGenNode({ data, id }: NodeProps) {
     mode: d.mode ?? 'standard',
     ratio: d.ratio ?? '16:9',
     durationS: d.durationS ?? 8,
+    resolution: d.resolution ?? '720p',
+    audio: d.audio ?? true,
   });
 
   const model = VIDEO_MODELS.find((m) => m.id === (d.model ?? VIDEO_MODELS[0].id)) ?? VIDEO_MODELS[0];
@@ -475,7 +481,7 @@ export function VideoGenNode({ data, id }: NodeProps) {
             value={settings}
             onChange={(next) => {
               setSettings(next);
-              updateNodeData(id, { mode: next.mode, ratio: next.ratio, durationS: next.durationS });
+              updateNodeData(id, { mode: next.mode, ratio: next.ratio, durationS: next.durationS, resolution: next.resolution, audio: next.audio });
             }}
           />
         )}
@@ -600,7 +606,7 @@ export function TextNode({ data, id }: NodeProps) {
     <div className="canvas-node node-text">
       <CornerDelete id={id} />
       <Handle type="target" position={Position.Left} id={`${id}-in`} />
-      <NodeHeader icon={MessageSquare} title="Text / LLM" status={d.status ?? 'idle'} />
+      <NodeHeader icon={Type} title="Text / LLM" status={d.status ?? 'idle'} />
       <div className="node-body">
         <select className="node-model" value={d.model ?? TEXT_MODELS[0].id} onChange={(e) => { d.model = e.target.value; force((n) => n + 1); }} aria-label="Text model">
           {TEXT_MODELS.map((m) => (
@@ -629,16 +635,42 @@ export function TextNode({ data, id }: NodeProps) {
 // ── Result ──
 export function ResultNode({ data, id }: NodeProps) {
   const d = data as BaseNodeData;
+  const [copied, setCopied] = useState(false);
+  // Pick a sensible filename extension from the URL (best-effort).
+  const ext = (d.resultUrl?.match(/\.(png|jpe?g|webp|gif|mp4|webm|mov|mp3|wav)(?:$|\?)/i)?.[1] || 'png').toLowerCase();
+  const onDownload = () => { if (d.resultUrl) void downloadUrl(d.resultUrl, `result-${id}.${ext}`); };
+  const onCopyText = async () => {
+    if (!d.resultText) return;
+    try {
+      await navigator.clipboard.writeText(d.resultText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* ignore */ }
+  };
   return (
     <div className="canvas-node node-result">
       <CornerDelete id={id} />
       <Handle type="target" position={Position.Left} id={`${id}-in`} />
-      <NodeHeader icon={Sparkles} title="Result" status={d.status ?? 'idle'} />
+      <NodeHeader icon={Target} title="Result" status={d.status ?? 'idle'} />
       <div className="node-body">
         {d.resultUrl ? <img src={d.resultUrl} alt="Output" className="node-thumb" />
           : d.resultText ? <pre className="node-result-text">{d.resultText}</pre>
             : <span className="dim">No output yet</span>}
       </div>
+      {(d.resultUrl || d.resultText) && (
+        <div className="node-result-actions">
+          {d.resultUrl && (
+            <button type="button" className="node-result-action" onClick={onDownload} title="Download result">
+              <Download size={12} aria-hidden /> Download
+            </button>
+          )}
+          {d.resultText && (
+            <button type="button" className="node-result-action" onClick={onCopyText} title="Copy text result">
+              {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />} {copied ? 'Copied' : 'Copy text'}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -657,7 +689,7 @@ export function GroupNode({ data, id, selected }: NodeProps) {
         handleClassName="group-resize-handle"
       />
       <div className="group-label">
-        <Frame size={11} strokeWidth={1.5} aria-hidden />
+        <SquareDashed size={11} strokeWidth={1.5} aria-hidden />
         <span>{d.label ?? 'Group'}</span>
       </div>
     </div>
@@ -703,7 +735,7 @@ export function TimelineNode({ data, id }: NodeProps) {
       <Handle type="target" position={Position.Left} id={`${id}-in`} />
       <div className="canvas-node node-timeline">
         <CornerDelete id={id} />
-        <NodeHeader icon={ListVideo} title="Timeline" status={clips.length ? 'done' : 'idle'} />
+        <NodeHeader icon={Clapperboard} title="Timeline" status={clips.length ? 'done' : 'idle'} />
         <div className="timeline-track nodrag" onClick={(e) => e.stopPropagation()}>
           {clips.length === 0 && <div className="timeline-empty">Add clips to sequence them</div>}
           {clips.map((c, i) => (
@@ -771,7 +803,7 @@ export interface NodeCatalogEntry {
 
 export const NODE_CATALOG: NodeCatalogEntry[] = [
   // Generate
-  { type: 'text', label: 'Text', description: 'Scripts, ad copy, brand voice', category: 'generate', icon: MessageSquare,
+  { type: 'text', label: 'Text', description: 'Scripts, ad copy, brand voice', category: 'generate', icon: Type,
     defaultData: { model: TEXT_MODELS[0].id, prompt: '', priceUsd: 0 } },
   { type: 'imagegen', label: 'Image', description: 'Photoreal, stylized, anime', category: 'generate', icon: ImageIcon,
     defaultData: { model: IMAGE_MODELS[0].id, prompt: '', priceUsd: IMAGE_MODELS[0].price } },
@@ -780,14 +812,14 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
   { type: 'musicgen', label: 'Music', description: '~3min tracks with optional lyrics', category: 'generate', icon: Music,
     defaultData: { model: MUSIC_MODELS[0].id, prompt: '', priceUsd: MUSIC_MODELS[0].price, lyricsMode: 'adaptive', lyrics: '' } },
   // Utility
-  { type: 'timeline', label: 'Timeline', description: 'Sequence clips into a cut', category: 'utility', icon: ListVideo,
+  { type: 'timeline', label: 'Timeline', description: 'Sequence clips into a cut', category: 'utility', icon: Clapperboard,
     defaultData: { clips: [] }, beta: true },
-  { type: 'group', label: 'Group / Frame', description: 'Visually group nodes', category: 'utility', icon: Frame,
+  { type: 'group', label: 'Group / Frame', description: 'Visually group nodes', category: 'utility', icon: SquareDashed,
     defaultData: { label: 'Group' } },
-  { type: 'result', label: 'Result', description: 'Final output preview', category: 'utility', icon: Sparkles,
+  { type: 'result', label: 'Result', description: 'Final output preview', category: 'utility', icon: Target,
     defaultData: {} },
   // Resource
-  { type: 'upload', label: 'Upload', description: 'Drop or pick a reference image', category: 'resource', icon: Upload,
+  { type: 'upload', label: 'Upload', description: 'Drop or pick a reference image', category: 'resource', icon: ImagePlus,
     defaultData: {} },
 ];
 
