@@ -3,7 +3,7 @@
 
 import { Handle, NodeResizer, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { useEffect, useState, useRef } from 'react';
-import { Upload, ImageIcon, Film, Type, SquareDashed, Target, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus, Download, Copy, Check } from 'lucide-react';
+import { Upload, ImageIcon, Film, Type, SquareDashed, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus } from 'lucide-react';
 import NodeFrame from './NodeFrame';
 import NodeActionMenu from './NodeActionMenu';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
@@ -638,49 +638,6 @@ export function TextNode({ data, id }: NodeProps) {
   );
 }
 
-// ── Result ──
-export function ResultNode({ data, id }: NodeProps) {
-  const d = data as BaseNodeData;
-  const [copied, setCopied] = useState(false);
-  // Pick a sensible filename extension from the URL (best-effort).
-  const ext = (d.resultUrl?.match(/\.(png|jpe?g|webp|gif|mp4|webm|mov|mp3|wav)(?:$|\?)/i)?.[1] || 'png').toLowerCase();
-  const onDownload = () => { if (d.resultUrl) void downloadUrl(d.resultUrl, `result-${id}.${ext}`); };
-  const onCopyText = async () => {
-    if (!d.resultText) return;
-    try {
-      await navigator.clipboard.writeText(d.resultText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { /* ignore */ }
-  };
-  return (
-    <div className="canvas-node node-result">
-      <CornerDelete id={id} />
-      <Handle type="target" position={Position.Left} id={`${id}-in`} />
-      <NodeHeader icon={Target} title="Result" status={d.status ?? 'idle'} />
-      <div className="node-body">
-        {d.resultUrl ? <img src={d.resultUrl} alt="Output" className="node-thumb" />
-          : d.resultText ? <pre className="node-result-text">{d.resultText}</pre>
-            : <span className="dim">No output yet</span>}
-      </div>
-      {(d.resultUrl || d.resultText) && (
-        <div className="node-result-actions">
-          {d.resultUrl && (
-            <button type="button" className="node-result-action" onClick={onDownload} title="Download result">
-              <Download size={12} aria-hidden /> Download
-            </button>
-          )}
-          {d.resultText && (
-            <button type="button" className="node-result-action" onClick={onCopyText} title="Copy text result">
-              {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />} {copied ? 'Copied' : 'Copy text'}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Group / frame ──
 export function GroupNode({ data, id, selected }: NodeProps) {
   const d = data as { label?: string };
@@ -883,7 +840,6 @@ export const NODE_TYPES = {
   videogen: VideoGenNode,
   musicgen: MusicGenNode,
   text: TextNode,
-  result: ResultNode,
   group: GroupNode,
   timeline: TimelineNode,
 };
@@ -916,8 +872,6 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     defaultData: { clips: [] } },
   { type: 'group', label: 'Group / Frame', description: 'Visually group nodes', category: 'utility', icon: SquareDashed,
     defaultData: { label: 'Group' } },
-  { type: 'result', label: 'Result', description: 'Final output preview', category: 'utility', icon: Target,
-    defaultData: {} },
   // Resource
   { type: 'upload', label: 'Upload', description: 'Drop or pick a reference image', category: 'resource', icon: ImagePlus,
     defaultData: {} },

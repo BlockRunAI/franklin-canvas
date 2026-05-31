@@ -77,7 +77,7 @@ const GENERATE_TYPES = NODE_CATALOG.filter((n) =>
   ['text', 'imagegen', 'videogen'].includes(n.type),
 );
 const UTILITY_TYPES = NODE_CATALOG.filter((n) =>
-  ['result', 'group', 'timeline'].includes(n.type),
+  ['group', 'timeline'].includes(n.type),
 );
 
 interface PendingConnect {
@@ -869,7 +869,6 @@ function descriptionFor(type: string): string {
     case 'imagegen': return 'Generate image from prompt or reference';
     case 'videogen': return 'Generate video from prompt or reference';
     case 'musicgen': return 'Generate a music track';
-    case 'result': return 'Final output preview';
     case 'upload': return 'Upload a reference image';
     case 'timeline': return 'Sequence clips into a cut';
     case 'group': return 'Visually group nodes';

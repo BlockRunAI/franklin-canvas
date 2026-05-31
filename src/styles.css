@@ -2032,7 +2032,7 @@ button:active:not(:disabled) { transform: scale(0.97); }
 
 .timeline-track {
   position: relative; padding: 22px 12px 0;
-  background: rgba(0,0,0,0.18);
+  background: transparent;
   border-radius: 14px;
   overflow: visible;
 }
@@ -2056,10 +2056,10 @@ button:active:not(:disabled) { transform: scale(0.97); }
 
 .timeline-strip {
   position: relative; height: 84px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(0,0,0,0.10) 100%);
+  background: var(--panel-soft);
   border-radius: 10px;
-  border: 1px solid var(--panel-border);
-  overflow: hidden;
+  border: 1px dashed var(--panel-border);
+  overflow: visible;
 }
 
 .timeline-empty-pop {
