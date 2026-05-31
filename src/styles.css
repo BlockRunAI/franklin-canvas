@@ -1704,6 +1704,16 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .prompt-bar-banner strong { color: #f5c378; font-weight: 600; }
 .prompt-bar-banner a { color: #f5c378; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .prompt-bar-banner a:hover { color: #fbbf24; }
+.prompt-bar-banner-addr {
+  display: inline-flex; padding: 0; margin: 0; background: none; border: 0;
+  font: inherit; cursor: pointer;
+}
+.prompt-bar-banner-addr code {
+  background: rgba(245,195,120,0.18); padding: 1px 6px; border-radius: 4px;
+  color: #f5c378; font-weight: 600;
+  transition: background 0.14s ease;
+}
+.prompt-bar-banner-addr:hover code { background: rgba(245,195,120,0.30); }
 .prompt-bar-top, .prompt-bar-bottom { display: flex; align-items: center; gap: 8px; }
 .prompt-bar-input { width: 100%; margin: 10px 0; border: 0; background: transparent; color: var(--fg); font-size: 14px; resize: none; outline: none; font-family: inherit; }
 .prompt-bar-input::placeholder { color: var(--fg-faint); }

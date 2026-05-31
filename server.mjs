@@ -23,10 +23,8 @@ import {
   ImageClient,
   MusicClient,
   SolanaLLMClient,
-  loadWallet,
-  loadSolanaWallet,
-  getWalletAddress,
-  solanaPublicKey,
+  getOrCreateWallet,
+  getOrCreateSolanaWallet,
   getCostLogSummary,
   parsePaymentRequired,
   extractPaymentDetails,
@@ -75,35 +73,32 @@ function readBody(req) {
   });
 }
 
-// Resolve the wallet private key the same way Franklin core does: SDK file
-// (~/.blockrun/wallet) first, then BASE_CHAIN_WALLET_KEY env override. The
-// server boots even if no wallet is configured yet — generation calls just
-// error with a clear message until one is set.
+// Wallet helpers — Franklin-style. getOrCreateWallet() reads the SDK file
+// (~/.blockrun/wallet) if it exists, otherwise mints a new EVM wallet on
+// the spot and writes it to disk. Same file Franklin core uses, so the two
+// products share one wallet per machine. New users skip the "go install
+// Franklin first" step entirely; they just need to fund the auto-generated
+// address with USDC on Base to start generating.
+//
+// `isNew` lets the UI tell the user "we just created this for you" the
+// first time, so they know where to send funds.
 function getWallet() {
   try {
-    const privateKey = loadWallet() || process.env.BASE_CHAIN_WALLET_KEY || null;
-    let address = '';
-    try { address = getWalletAddress() || ''; } catch { /* ignore */ }
-    return { privateKey, address };
+    const w = getOrCreateWallet();
+    return { privateKey: w.privateKey, address: w.address, isNew: !!w.isNew };
   } catch {
-    return { privateKey: null, address: '' };
+    return { privateKey: null, address: '', isNew: false };
   }
 }
 
-// Solana wallet companion. Returns the bs58-encoded secret key + the base58
-// public-key derived from it. SDK loads from ~/.blockrun/solana-wallet (or
-// SOLANA_WALLET_KEY env). Address derivation is async because
-// solanaPublicKey() needs @solana/web3.js, so we await it at call site.
+// Solana version of the same auto-create flow. Async because the underlying
+// @solana/web3.js helpers are lazy-loaded.
 async function getSolanaWallet() {
   try {
-    const privateKey = loadSolanaWallet() || process.env.SOLANA_WALLET_KEY || null;
-    let address = '';
-    if (privateKey) {
-      try { address = await solanaPublicKey(privateKey); } catch { /* ignore */ }
-    }
-    return { privateKey, address };
+    const w = await getOrCreateSolanaWallet();
+    return { privateKey: w.privateKey, address: w.address, isNew: !!w.isNew };
   } catch {
-    return { privateKey: null, address: '' };
+    return { privateKey: null, address: '', isNew: false };
   }
 }
 
@@ -414,7 +409,7 @@ const server = http.createServer(async (req, res) => {
       const chain = (url.searchParams.get('chain') || 'base').toLowerCase() === 'solana' ? 'solana' : 'base';
       try {
         const wallet = chain === 'solana' ? await getSolanaWallet() : getWallet();
-        const { address, privateKey } = wallet;
+        const { address, privateKey, isNew } = wallet;
         let balanceUsdc = 0;
         let recentSpendUsd = 0;   // true rolling 24h
         let totalSpendUsd = 0;    // all-time
@@ -454,10 +449,10 @@ const server = http.createServer(async (req, res) => {
           }
         } catch { /* ignore — show 0 if balance lookup fails */ }
         const network = chain === 'solana' ? 'Solana' : 'Base';
-        return json(req, res, { address, balanceUsdc, recentSpendUsd, totalSpendUsd, network, chain, spendByCategory });
+        return json(req, res, { address, balanceUsdc, recentSpendUsd, totalSpendUsd, network, chain, isNew, spendByCategory });
       } catch (err) {
         const network = chain === 'solana' ? 'Solana' : 'Base';
-        return json(req, res, { address: '', balanceUsdc: 0, recentSpendUsd: 0, totalSpendUsd: 0, network, chain, spendByCategory: [], error: String(err) });
+        return json(req, res, { address: '', balanceUsdc: 0, recentSpendUsd: 0, totalSpendUsd: 0, network, chain, isNew: false, spendByCategory: [], error: String(err) });
       }
     }
 

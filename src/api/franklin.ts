@@ -43,6 +43,7 @@ export async function getWallet(chain: WalletChain = 'base'): Promise<WalletInfo
     totalSpendUsd: Number(raw.totalSpendUsd ?? raw.total_spend_usd ?? 0),
     network: String(raw.network ?? (chain === 'solana' ? 'Solana' : 'Base')),
     chain: (raw.chain as WalletChain) ?? chain,
+    isNew: !!raw.isNew,
     spendByCategory: raw.spendByCategory ?? raw.spend_by_category ?? [],
   };
 }

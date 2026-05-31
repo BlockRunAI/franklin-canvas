@@ -175,11 +175,13 @@ export default function PromptBar({ onSend }: Props) {
   // the node, just anchored to the PromptBar so users can tweak size /
   // aspect / duration without clicking away from the prompt area.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Wallet readiness — null = unknown (still loading), true = at least one
-  // chain has an address configured, false = no wallet on either chain.
-  // Drives a one-line banner so first-time users see "configure a wallet"
-  // before they click Send and hit a backend error.
-  const [walletReady, setWalletReady] = useState<boolean | null>(null);
+  // Wallet snapshot (null while loading). Wallet is auto-created on first
+  // /api/wallet call, so `address` is always non-empty once loaded — the
+  // banner now nudges users to FUND the address, not to set one up.
+  const [walletState, setWalletState] = useState<{
+    address: string; balanceUsdc: number; isNew: boolean; network: string;
+  } | null>(null);
+
   const fileRef = useRef<HTMLInputElement>(null);
   const { updateNodeData } = useReactFlow();
 
@@ -187,16 +189,23 @@ export default function PromptBar({ onSend }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const [base, sol] = await Promise.all([
-          getWallet('base').catch(() => null),
-          getWallet('solana').catch(() => null),
-        ]);
+        // Prefer Base by default; only fall back to Solana if Base errored.
+        const w = await getWallet('base').catch(() => null);
         if (cancelled) return;
-        setWalletReady(!!(base?.address || sol?.address));
-      } catch { if (!cancelled) setWalletReady(false); }
+        if (w?.address) {
+          setWalletState({ address: w.address, balanceUsdc: w.balanceUsdc, isNew: !!w.isNew, network: w.network });
+        }
+      } catch { /* leave null */ }
     })();
     return () => { cancelled = true; };
   }, []);
+  const needsFunding = walletState !== null && walletState.balanceUsdc < 0.01;
+  const shortAddr = walletState?.address
+    ? `${walletState.address.slice(0, 6)}…${walletState.address.slice(-4)}`
+    : '';
+  const copyAddr = () => {
+    if (walletState?.address) void navigator.clipboard.writeText(walletState.address);
+  };
 
   // Hydrate from the bound node whenever the selection changes.
   useEffect(() => {
@@ -247,14 +256,16 @@ export default function PromptBar({ onSend }: Props) {
 
   return (
     <div className="prompt-bar nodrag nopan" onClick={(e) => e.stopPropagation()}>
-      {walletReady === false && (
+      {needsFunding && walletState && (
         <div className="prompt-bar-banner" role="status">
           <AlertCircle size={13} aria-hidden />
           <span>
-            No wallet configured. Install{' '}
-            <a href="https://github.com/BlockRunAI/Franklin" target="_blank" rel="noopener noreferrer">Franklin core</a>{' '}
-            and run <code>franklin wallet init</code>, then top up with USDC on
-            Base or Solana.
+            {walletState.isNew ? 'Wallet just created' : 'Wallet ready'} on{' '}
+            <strong>{walletState.network}</strong>. Send USDC to{' '}
+            <button type="button" className="prompt-bar-banner-addr" onClick={copyAddr} title="Copy full address">
+              <code>{shortAddr}</code>
+            </button>{' '}
+            to start generating.
           </span>
         </div>
       )}

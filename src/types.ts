@@ -25,6 +25,10 @@ export interface WalletInfo {
   network: string;
   /** Settlement chain — present on responses; defaults to 'base' if missing. */
   chain?: WalletChain;
+  /** True iff this wallet was just auto-created on the current /api/wallet
+   *  call (file didn't exist on disk before). Lets the UI show a one-time
+   *  "wallet ready, send USDC here" hint instead of treating it as normal. */
+  isNew?: boolean;
   spendByCategory: { category: string; usd: number }[];
 }
 
