@@ -317,7 +317,7 @@ export default function PromptBar({ onSend }: Props) {
               aria-expanded={settingsOpen}
               title="Generation settings"
             >
-              <Settings2 size={18} strokeWidth={2} aria-hidden />
+              <Settings2 size={20} strokeWidth={2.2} aria-hidden />
             </button>
             {settingsOpen && mode === 'imagegen' && (() => {
               const nd = selectedNode?.data as { size?: ImageSize; quality?: ImageQuality; n?: number } | undefined;

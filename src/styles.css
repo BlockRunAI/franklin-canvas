@@ -1716,9 +1716,11 @@ button:active:not(:disabled) { transform: scale(0.97); }
    anchors a popover that floats up out of the PromptBar so users can change
    image size / video aspect-ratio without leaving the prompt area. */
 .pb-settings-wrap { position: relative; display: inline-flex; }
-.pb-settings-btn { width: 30px; height: 30px; }
-.pb-settings-btn svg { width: 16px; height: 16px; }
-.pb-settings-btn.is-active { color: var(--accent); border-color: var(--accent-ring); }
+/* Match the other PromptBar icon buttons (paperclip / ref picker = 38×38)
+   so the gear doesn't look like a tiny afterthought next to them. */
+.pb-settings-btn { width: 38px; height: 38px; }
+.pb-settings-btn svg { width: 20px; height: 20px; }
+.pb-settings-btn.is-active { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-bg); }
 .pb-settings-pop {
   position: absolute; bottom: calc(100% + 10px); left: 0; z-index: 30;
 }
