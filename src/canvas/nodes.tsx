@@ -913,7 +913,7 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     defaultData: { model: MUSIC_MODELS[0].id, prompt: '', priceUsd: MUSIC_MODELS[0].price, lyricsMode: 'adaptive', lyrics: '' } },
   // Utility
   { type: 'timeline', label: 'Timeline', description: 'Sequence clips into a cut', category: 'utility', icon: Clapperboard,
-    defaultData: { clips: [] }, beta: true },
+    defaultData: { clips: [] } },
   { type: 'group', label: 'Group / Frame', description: 'Visually group nodes', category: 'utility', icon: SquareDashed,
     defaultData: { label: 'Group' } },
   { type: 'result', label: 'Result', description: 'Final output preview', category: 'utility', icon: Target,

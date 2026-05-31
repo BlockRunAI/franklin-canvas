@@ -2004,13 +2004,18 @@ button:active:not(:disabled) { transform: scale(0.97); }
 /* ── Timeline node ── */
 /* ── Timeline / Playlist — horizontal time-axis playlist ──
    Renders a ruler (00:00 / 00:10 / 00:20 …) and lays clip blocks against
-   it at proportional widths. Looks like a stripped-down NLE track. */
+   it at proportional widths. Looks like a stripped-down NLE track.
+   Overrides the .canvas-node defaults (240px wide + overflow hidden)
+   because the track is significantly wider than a normal node card. */
 .node-timeline {
+  width: auto;
+  min-width: 1000px;
   padding: 10px 12px 12px;
   position: relative;
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
+  overflow: visible;
 }
 .timeline-head {
   display: inline-flex; align-items: center; gap: 6px;
