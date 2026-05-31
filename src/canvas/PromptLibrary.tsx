@@ -11,7 +11,10 @@ import { listPrompts, getPromptDetail, type PromptItem } from '../api/franklin';
 interface Props {
   open: boolean;
   onClose: () => void;
-  onUse: (prompt: string) => void;
+  /** Receives the prompt body + the source case's workflow hint so the
+   *  canvas can spawn the right node type (imagegen vs videogen) instead
+   *  of always defaulting to imagegen. */
+  onUse: (prompt: string, workflow?: string) => void;
 }
 
 // Module-level cache so re-renders / filtering never refetch a case detail.
@@ -19,7 +22,7 @@ const detailCache = new Map<string, { prompt: string; image?: string }>();
 
 function PromptCard({
   item, onUse, onClose,
-}: { item: PromptItem; onUse: (p: string) => void; onClose: () => void }) {
+}: { item: PromptItem; onUse: (p: string, workflow?: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLLIElement>(null);
   const [detail, setDetail] = useState<{ prompt: string; image?: string } | null>(
     item.path ? detailCache.get(item.path) ?? null : { prompt: item.prompt, image: item.image },
@@ -45,13 +48,13 @@ function PromptCard({
   }, [item.path, detail]);
 
   const use = async () => {
-    if (detail?.prompt) { onUse(detail.prompt); onClose(); return; }
+    if (detail?.prompt) { onUse(detail.prompt, item.workflow); onClose(); return; }
     if (!item.path) return;
     setBusy(true);
     try {
       const d = detailCache.get(item.path) ?? await getPromptDetail(item.path);
       detailCache.set(item.path, d);
-      if (d.prompt) { onUse(d.prompt); onClose(); }
+      if (d.prompt) { onUse(d.prompt, item.workflow); onClose(); }
     } catch { /* ignore */ } finally { setBusy(false); }
   };
 

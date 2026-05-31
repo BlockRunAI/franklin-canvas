@@ -368,17 +368,25 @@ function CanvasInner() {
     setNodes((nds) => (isGroup ? [newNode, ...nds] : [...nds, newNode]));
   };
 
-  // Drop an image node pre-filled with a library prompt and select it, so the
+  // Drop a node pre-filled with a library prompt and select it so the
   // PromptBar binds to it and the user just hits Send (or tweaks first).
-  const usePromptFromLibrary = (prompt: string) => {
+  // Node type follows the case's workflow tag — text2video / image2video
+  // spawn a videogen, everything else (text2image / image2image / unset)
+  // spawns an imagegen. Previously hardcoded to imagegen, which left users
+  // wondering why their "make a 5-second clip" prompt landed in an image
+  // node.
+  const usePromptFromLibrary = (prompt: string, workflow?: string) => {
+    const wantsVideo = workflow === 'text2video' || workflow === 'image2video';
+    const targetType = wantsVideo ? 'videogen' : 'imagegen';
+    const entry = NODE_CATALOG.find((e) => e.type === targetType);
     const id = `n${idCounter.current++}`;
     const x = 380 + Math.random() * 200;
     const y = 200 + Math.random() * 150;
     const newNode: Node = {
       id,
-      type: 'imagegen',
+      type: targetType,
       position: { x, y },
-      data: { ...NODE_CATALOG.find((e) => e.type === 'imagegen')?.defaultData, prompt, status: 'idle' as NodeStatus },
+      data: { ...entry?.defaultData, prompt, status: 'idle' as NodeStatus },
       selected: true,
     };
     setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode]);

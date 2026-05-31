@@ -777,7 +777,7 @@ export function TimelineNode({ data, id }: NodeProps) {
         <CornerDelete id={id} />
         <div className="timeline-head">
           <Clapperboard size={13} strokeWidth={1.75} aria-hidden />
-          <span>Playlist</span>
+          <span>Timeline</span>
           <span className="timeline-head-spacer" />
           <span className="timeline-head-total">{formatMmSs(total)} / {formatMmSs(trackSeconds)}</span>
         </div>
