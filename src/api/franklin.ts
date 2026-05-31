@@ -163,7 +163,12 @@ export interface GenerateRequest {
   kind: 'image' | 'video' | 'music';
   prompt: string;
   model?: string;
+  /** Image: output dimensions (e.g. "1024x1024", "1792x1024"). */
   size?: string;
+  /** Image: rendering quality where the model supports it (gpt-image-*). */
+  quality?: 'standard' | 'hd';
+  /** Image: number of variants per call (1..4). */
+  n?: number;
   durationS?: number;
   lyrics?: string;
   instrumental?: boolean;

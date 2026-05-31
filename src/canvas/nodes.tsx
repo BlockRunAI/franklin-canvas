@@ -3,10 +3,11 @@
 
 import { Handle, NodeResizer, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { useEffect, useState, useRef } from 'react';
-import { Upload, ImageIcon, Film, Type, SquareDashed, Target, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus, ChevronLeft, ChevronRight, Download, Copy, Check } from 'lucide-react';
+import { Upload, ImageIcon, Film, Type, SquareDashed, Target, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus, ChevronLeft, ChevronRight, Download, Copy, Check, Settings2, MoreHorizontal } from 'lucide-react';
 import NodeFrame from './NodeFrame';
 import NodeActionMenu from './NodeActionMenu';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
+import ImageSettingsPanel, { type ImageSettings, type ImageSize, type ImageQuality } from './ImageSettingsPanel';
 import LyricsPanel, { type LyricsMode } from './LyricsPanel';
 import Lightbox from './Lightbox';
 import { useCanvasCtx } from './CanvasContext';
@@ -40,40 +41,44 @@ export interface TextNodeData extends BaseNodeData {
 
 // ── Catalogs (BlockRun gateway) ──
 
+// All prices below mirror the BlockRun gateway's /v1/models response as of
+// 2026-05-31. Models that aren't in the gateway catalog have been removed
+// (otherwise a Send hits a 404). Keep this list in sync with gateway updates.
 export const IMAGE_MODELS = [
-  { id: 'google/nano-banana', label: 'Nano Banana — fast, cheap', price: 0.012 },
-  { id: 'google/nano-banana-pro', label: 'Nano Banana Pro — photoreal', price: 0.04 },
-  { id: 'openai/gpt-image-1', label: 'GPT Image 1 — versatile', price: 0.04 },
-  { id: 'openai/gpt-image-2', label: 'GPT Image 2 — premium', price: 0.08 },
-  { id: 'xai/grok-imagine-image', label: 'Grok Imagine — general', price: 0.03 },
-  { id: 'xai/grok-imagine-image-pro', label: 'Grok Imagine Pro — detail', price: 0.06 },
-  { id: 'zai/cogview-4', label: 'CogView 4 — anime / stylized', price: 0.025 },
+  { id: 'google/nano-banana', label: 'Nano Banana', price: 0.05 },
+  { id: 'google/nano-banana-pro', label: 'Nano Banana Pro', price: 0.10 },
+  { id: 'openai/gpt-image-1', label: 'GPT Image 1', price: 0.02 },
+  { id: 'openai/gpt-image-2', label: 'GPT Image 2', price: 0.06 },
+  { id: 'xai/grok-imagine-image', label: 'Grok Imagine', price: 0.02 },
+  { id: 'xai/grok-imagine-image-pro', label: 'Grok Imagine Pro', price: 0.07 },
+  { id: 'zai/cogview-4', label: 'CogView 4', price: 0.015 },
 ];
 
-// Default first entry. Grok intentionally bumped to the bottom — slower
-// upstream + lower fidelity for the canvas use case.
+// per-second pricing; cheapest first so the demo default cost stays low.
 export const VIDEO_MODELS = [
-  { id: 'bytedance/seedance-2.0', label: 'Seedance 2.0 — cinematic', pricePerS: 0.20 },
-  { id: 'bytedance/seedance-2.0-fast', label: 'Seedance 2.0 Fast', pricePerS: 0.15 },
-  { id: 'bytedance/seedance-1.5-pro', label: 'Seedance 1.5 Pro', pricePerS: 0.12 },
-  { id: 'xai/grok-imagine-video', label: 'Grok Imagine — 8s default', pricePerS: 0.05 },
+  { id: 'xai/grok-imagine-video', label: 'Grok Imagine', pricePerS: 0.05 },
+  { id: 'bytedance/seedance-1.5-pro', label: 'Seedance 1.5 Pro', pricePerS: 0.092 },
+  { id: 'azure/sora-2', label: 'Sora 2', pricePerS: 0.10 },
+  { id: 'bytedance/seedance-2.0-fast', label: 'Seedance 2.0 Fast', pricePerS: 0.238 },
+  { id: 'bytedance/seedance-2.0', label: 'Seedance 2.0 Pro', pricePerS: 0.298 },
 ];
 
 export const MUSIC_MODELS = [
-  { id: 'minimax/music-2.5+',  label: 'MiniMax Music 2.5+',     price: 0.158 },
-  { id: 'minimax/music-2.6',   label: 'MiniMax Music 2.6 — new', price: 0.20 },
-  { id: 'elevenlabs/music-v3', label: 'ElevenLabs V3',          price: 0.18 },
-  { id: 'mureka/v8',           label: 'Mureka V8 — expressive', price: 0.16 },
-  { id: 'mureka/o2',           label: 'Mureka O2 — pro',        price: 0.24 },
+  { id: 'minimax/music-2.5+', label: 'MiniMax Music 2.5+', price: 0.15 },
 ];
 
+// per 1k tokens (blended ~50/50 input/output for display purposes; real cost
+// depends on actual prompt + completion size). Gateway IDs use dots, not
+// hyphens (e.g. claude-opus-4.7) — getting that wrong means a 404 at send.
 export const TEXT_MODELS = [
-  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5 — fast', priceK: 0.0008 },
-  { id: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', priceK: 0.003 },
-  { id: 'anthropic/claude-opus-4-7', label: 'Claude Opus 4.7 — flagship', priceK: 0.015 },
-  { id: 'openai/gpt-5.5', label: 'GPT-5.5', priceK: 0.005 },
-  { id: 'google/gemini-3.1-pro', label: 'Gemini 3.1 Pro', priceK: 0.0025 },
-  { id: 'xai/grok-4-1-fast-reasoning', label: 'Grok 4.1 Fast', priceK: 0.002 },
+  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', priceK: 0.003 },
+  { id: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', priceK: 0.009 },
+  { id: 'anthropic/claude-opus-4.7', label: 'Claude Opus 4.7', priceK: 0.015 },
+  { id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', priceK: 0.015 },
+  { id: 'openai/gpt-5.5', label: 'GPT-5.5', priceK: 0.0175 },
+  { id: 'google/gemini-3.1-pro', label: 'Gemini 3.1 Pro', priceK: 0.007 },
+  { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', priceK: 0.0014 },
+  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', priceK: 0.00075 },
 ];
 
 // ── Helpers ──
@@ -250,12 +255,22 @@ export function UploadNode({ data, id }: NodeProps) {
 // ── Image Gen ──
 export function ImageGenNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
-  const d = data as GenNodeData & { title?: string };
+  const d = data as GenNodeData & { title?: string; size?: ImageSize; quality?: ImageQuality; n?: number };
   const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { updateNodeData, getNodes } = useReactFlow();
   const { runImageEdit, runImageSplit, runAnnotate } = useCanvasCtx();
+  // Quality only matters on the gpt-image-* models; nano-banana / grok-imagine
+  // ignore it. Hide the row instead of pretending it does anything.
+  const modelId = d.model ?? IMAGE_MODELS[0].id;
+  const supportsQuality = modelId.startsWith('openai/gpt-image');
+  const settings: ImageSettings = {
+    size: d.size ?? '1024x1024',
+    quality: d.quality ?? 'standard',
+    n: d.n ?? 1,
+  };
   const navLightbox = (dir: 1 | -1) => {
     const peers = getNodes().filter((n) => n.type === 'imagegen' && (n.data as GenNodeData)?.resultUrl);
     if (peers.length < 2) return;
@@ -285,24 +300,38 @@ export function ImageGenNode({ data, id }: NodeProps) {
         hasResult={!!d.resultUrl}
         onDownload={() => d.resultUrl && void downloadUrl(d.resultUrl, `${d.title || id}.png`)}
         onExpand={() => d.resultUrl && setLightboxSrc(d.resultUrl as string)}
-        onMore={() => setMenuOpen((v) => !v)}
-        toolbarExtra={menuOpen && (
-          <NodeActionMenu
-            imageReady={!!d.resultUrl}
-            onItemClick={(item) => {
-              setMenuOpen(false);
-              if (['outpaint', 'enhance', 'cutout', 'pixels'].includes(item.id)) {
-                runImageEdit(id, item.id as 'outpaint' | 'enhance' | 'cutout' | 'pixels');
-              } else if (item.id === 'split2') {
-                runImageSplit(id, 2, 2);
-              } else if (item.id === 'split3') {
-                runImageSplit(id, 3, 3);
-              } else if (item.id === 'annotate') {
-                runAnnotate(id);
-              }
-            }}
-          />
-        )}
+        // Two left-toolbar buttons: a gear for size/quality/variants and the
+        // existing More for image-edit actions (Outpaint / Enhance / etc).
+        // They're mutually exclusive — opening one closes the other.
+        toolbarLeft={[
+          { id: 'settings', iconComponent: Settings2, label: 'Image settings (size / quality)', onClick: () => { setSettingsOpen((v) => !v); setMenuOpen(false); } },
+          { id: 'more',     iconComponent: MoreHorizontal, label: 'Edit actions',              onClick: () => { setMenuOpen((v) => !v); setSettingsOpen(false); } },
+        ]}
+        toolbarExtra={
+          settingsOpen ? (
+            <ImageSettingsPanel
+              value={settings}
+              showQuality={supportsQuality}
+              onChange={(next) => updateNodeData(id, { size: next.size, quality: next.quality, n: next.n })}
+            />
+          ) : menuOpen ? (
+            <NodeActionMenu
+              imageReady={!!d.resultUrl}
+              onItemClick={(item) => {
+                setMenuOpen(false);
+                if (['outpaint', 'enhance', 'cutout', 'pixels'].includes(item.id)) {
+                  runImageEdit(id, item.id as 'outpaint' | 'enhance' | 'cutout' | 'pixels');
+                } else if (item.id === 'split2') {
+                  runImageSplit(id, 2, 2);
+                } else if (item.id === 'split3') {
+                  runImageSplit(id, 3, 3);
+                } else if (item.id === 'annotate') {
+                  runAnnotate(id);
+                }
+              }}
+            />
+          ) : null
+        }
       >
         <div className="media-card">
           <CornerDelete id={id} />

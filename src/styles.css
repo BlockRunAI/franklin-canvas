@@ -1388,6 +1388,38 @@ button:active:not(:disabled) { transform: scale(0.97); }
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 
+/* ── Canvas view bar — bottom-right floating pill for zoom + view toggles.
+   Sits above the minimap; theme-aware via --panel-bg. */
+.canvas-view-bar {
+  position: absolute; right: 16px; bottom: 16px; z-index: 9;
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 4px 6px; border-radius: 999px;
+  background: var(--panel-bg); border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  pointer-events: auto;
+}
+.view-bar-btn {
+  width: 30px; height: 30px; padding: 0; border: 0; background: transparent;
+  border-radius: 999px; color: var(--fg-dim);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+.view-bar-btn:hover { background: var(--panel-soft); color: var(--fg); }
+.view-bar-btn.is-active { color: var(--accent); }
+.view-bar-divider { width: 1px; height: 16px; background: var(--panel-border); margin: 0 4px; }
+.view-bar-pct {
+  min-width: 44px; text-align: center;
+  font-size: 12px; font-weight: 500; color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* When the minimap is visible, lift the bar above it (React Flow's default
+   minimap is ~150px tall + ~10px outer margin). When hidden, drop the bar
+   back down to its own 16px margin. Class is set in CanvasViewBar from the
+   showMinimap zustand pref (more reliable across browsers than :has()). */
+.canvas-view-bar.is-above-minimap { bottom: 176px; }
+
 /* Wallet pill in the top toolbar — clickable, opens Settings → Wallet. */
 .canvas-wallet-btn {
   display: inline-flex; align-items: center; gap: 4px;
@@ -1638,7 +1670,10 @@ button:active:not(:disabled) { transform: scale(0.97); }
 
 /* ── Model dropdown ── */
 .model-dropdown { position: relative; }
-.model-dropdown-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.04); color: var(--fg); font-size: 12px; max-width: 200px; }
+.model-dropdown-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-soft); color: var(--fg); font-size: 12px; max-width: 200px; cursor: pointer; }
+.model-dropdown-btn:hover { border-color: var(--accent-ring); }
+.model-dropdown-chevron { color: var(--fg-dim); flex-shrink: 0; transition: transform 0.14s ease; }
+.model-dropdown-btn[aria-expanded="true"] .model-dropdown-chevron { transform: rotate(180deg); color: var(--fg); }
 .model-dropdown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-dropdown-menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30; min-width: 240px; max-height: 280px; overflow-y: auto; padding: 4px; border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--panel-border); box-shadow: var(--shadow-lg); list-style: none; margin: 0; }
 .model-dropdown-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); font-size: 12.5px; cursor: pointer; text-align: left; }

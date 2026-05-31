@@ -39,7 +39,7 @@ export default function ModelDropdown({ models, value, onChange }: Props) {
         title={current?.label}
       >
         <span className="model-dropdown-label">{current?.label ?? 'Model'}</span>
-        <ChevronDown size={13} aria-hidden />
+        <ChevronDown size={14} strokeWidth={2.2} className="model-dropdown-chevron" aria-hidden />
       </button>
       {open && (
         <ul className="model-dropdown-menu" role="listbox">

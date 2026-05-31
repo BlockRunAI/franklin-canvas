@@ -22,6 +22,8 @@ import { EDGE_TYPES } from '../canvas/edges';
 import PromptBar from '../canvas/PromptBar';
 import PromptLibrary from '../canvas/PromptLibrary';
 import AnnotateModal from '../canvas/AnnotateModal';
+import CanvasViewBar from '../canvas/CanvasViewBar';
+import { usePrefsStore } from '../canvas/prefsStore';
 import { CanvasContext, type ImageEditOp } from '../canvas/CanvasContext';
 import { generate } from '../api/franklin';
 import { getOrCreateCurrent, saveProjectCanvas, renameProject } from '../projects';
@@ -158,6 +160,8 @@ function CanvasInner() {
   const promptLibOpen = useUiStore((s) => s.promptLibOpen);
   const setPromptLibOpen = useUiStore((s) => s.setPromptLibOpen);
   const theme = useThemeStore((s) => s.theme);
+  const showMinimap = usePrefsStore((s) => s.showMinimap);
+  const showDots = usePrefsStore((s) => s.showDots);
   // Dot pattern + minimap mask colors that read well against each theme's bg.
   const bgDotColor = theme === 'dark' ? '#222' : theme === 'gold' ? '#d8d2c6' : '#e0e0dd';
   const minimapMask = theme === 'dark' ? 'rgba(7,7,10,0.85)' : 'rgba(255,255,255,0.7)';
@@ -429,6 +433,10 @@ function CanvasInner() {
       lyrics?: string;
       lyricsMode?: 'adaptive' | 'custom';
       referenceUrl?: string;
+      // Image-only: size + quality + variants from the gear popover
+      size?: '1024x1024' | '1024x1536' | '1536x1024' | '1024x1792' | '1792x1024';
+      quality?: 'standard' | 'hd';
+      n?: number;
     };
 
     let cancelled = false;
@@ -464,6 +472,10 @@ function CanvasInner() {
       aspectRatio: mode === 'videogen' ? d.ratio : undefined,
       resolution: mode === 'videogen' ? d.resolution : undefined,
       generateAudio: mode === 'videogen' ? d.audio : undefined,
+      // Image-only gateway params from the node's gear popover.
+      size: mode === 'imagegen' ? d.size : undefined,
+      quality: mode === 'imagegen' ? d.quality : undefined,
+      n: mode === 'imagegen' ? d.n : undefined,
     });
     cancelled = true;
     clearInterval(tick);
@@ -787,9 +799,10 @@ function CanvasInner() {
           minZoom={0.2}
           maxZoom={2.5}
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color={bgDotColor} />
-          <MiniMap pannable zoomable maskColor={minimapMask} />
+          {showDots && <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color={bgDotColor} />}
+          {showMinimap && <MiniMap pannable zoomable maskColor={minimapMask} />}
         </ReactFlow>
+        <CanvasViewBar />
         <PromptBar onSend={handlePromptSend} />
 
         {pending && (
