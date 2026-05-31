@@ -10,11 +10,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useReactFlow, useStore } from '@xyflow/react';
 import {
-  Paperclip, ArrowUp, ImageIcon, Film, Music, X, Plus, Upload, AlertCircle,
+  Paperclip, ArrowUp, ImageIcon, Film, Music, X, Plus, Upload, AlertCircle, Settings2,
   type LucideIcon,
 } from 'lucide-react';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS } from './nodes';
 import ModelDropdown from '../components/ModelDropdown';
+import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
+import ImageSettingsPanel, { type ImageSettings, type ImageSize, type ImageQuality } from './ImageSettingsPanel';
 import { getWallet } from '../api/franklin';
 
 type Mode = 'imagegen' | 'videogen' | 'musicgen';
@@ -169,6 +171,10 @@ export default function PromptBar({ onSend }: Props) {
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState<string>(IMAGE_MODELS[0].id);
   const [attachment, setAttachment] = useState<string | null>(null);
+  // Settings popover state for the gear button. Same panel surface used on
+  // the node, just anchored to the PromptBar so users can tweak size /
+  // aspect / duration without clicking away from the prompt area.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Wallet readiness — null = unknown (still loading), true = at least one
   // chain has an address configured, false = no wallet on either chain.
   // Drives a one-line banner so first-time users see "configure a wallet"
@@ -298,6 +304,63 @@ export default function PromptBar({ onSend }: Props) {
         </div>
         <div className="pb-divider" />
         <ModelDropdown models={meta.models} value={model} onChange={setModel} />
+        {/* Settings gear — Image: size/quality/variants · Video: aspect /
+            resolution / duration / audio. Hidden for music (handled inside
+            the music node's lyrics popover). */}
+        {(mode === 'imagegen' || mode === 'videogen') && (
+          <div className="pb-settings-wrap">
+            <button
+              type="button"
+              className={`pb-icon-btn pb-settings-btn ${settingsOpen ? 'is-active' : ''}`}
+              onClick={() => setSettingsOpen((v) => !v)}
+              aria-label="Open generation settings"
+              aria-expanded={settingsOpen}
+              title="Generation settings"
+            >
+              <Settings2 size={18} strokeWidth={2} aria-hidden />
+            </button>
+            {settingsOpen && mode === 'imagegen' && (() => {
+              const nd = selectedNode?.data as { size?: ImageSize; quality?: ImageQuality; n?: number } | undefined;
+              const value: ImageSettings = {
+                size: nd?.size ?? '1024x1024',
+                quality: nd?.quality ?? 'standard',
+                n: nd?.n ?? 1,
+              };
+              const supportsQuality = model.startsWith('openai/gpt-image');
+              return (
+                <div className="pb-settings-pop">
+                  <ImageSettingsPanel
+                    value={value}
+                    showQuality={supportsQuality}
+                    onChange={(next) => {
+                      if (selectedId) updateNodeData(selectedId, { size: next.size, quality: next.quality, n: next.n });
+                    }}
+                  />
+                </div>
+              );
+            })()}
+            {settingsOpen && mode === 'videogen' && (() => {
+              const nd = selectedNode?.data as { mode?: 'standard' | 'pro'; ratio?: AspectRatio; durationS?: number; resolution?: '480p' | '720p' | '1080p'; audio?: boolean } | undefined;
+              const value: VideoSettings = {
+                mode: nd?.mode ?? 'standard',
+                ratio: nd?.ratio ?? '16:9',
+                durationS: nd?.durationS ?? 8,
+                resolution: nd?.resolution ?? '720p',
+                audio: nd?.audio ?? true,
+              };
+              return (
+                <div className="pb-settings-pop">
+                  <VideoSettingsPanel
+                    value={value}
+                    onChange={(next) => {
+                      if (selectedId) updateNodeData(selectedId, { mode: next.mode, ratio: next.ratio, durationS: next.durationS, resolution: next.resolution, audio: next.audio });
+                    }}
+                  />
+                </div>
+              );
+            })()}
+          </div>
+        )}
         <div className="pb-flex" />
         <div
           className="pb-cost"
