@@ -331,11 +331,10 @@ export default function PromptBar({ onSend }: Props) {
               <Settings2 size={20} strokeWidth={2.2} aria-hidden />
             </button>
             {settingsOpen && mode === 'imagegen' && (() => {
-              const nd = selectedNode?.data as { size?: ImageSize; quality?: ImageQuality; n?: number } | undefined;
+              const nd = selectedNode?.data as { size?: ImageSize; quality?: ImageQuality } | undefined;
               const value: ImageSettings = {
                 size: nd?.size ?? '1024x1024',
                 quality: nd?.quality ?? 'standard',
-                n: nd?.n ?? 1,
               };
               const supportsQuality = model.startsWith('openai/gpt-image');
               return (
@@ -344,7 +343,7 @@ export default function PromptBar({ onSend }: Props) {
                     value={value}
                     showQuality={supportsQuality}
                     onChange={(next) => {
-                      if (selectedId) updateNodeData(selectedId, { size: next.size, quality: next.quality, n: next.n });
+                      if (selectedId) updateNodeData(selectedId, { size: next.size, quality: next.quality });
                     }}
                   />
                 </div>

@@ -255,7 +255,7 @@ export function UploadNode({ data, id }: NodeProps) {
 // ── Image Gen ──
 export function ImageGenNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
-  const d = data as GenNodeData & { title?: string; size?: ImageSize; quality?: ImageQuality; n?: number };
+  const d = data as GenNodeData & { title?: string; size?: ImageSize; quality?: ImageQuality };
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -269,7 +269,6 @@ export function ImageGenNode({ data, id }: NodeProps) {
   const settings: ImageSettings = {
     size: d.size ?? '1024x1024',
     quality: d.quality ?? 'standard',
-    n: d.n ?? 1,
   };
   const navLightbox = (dir: 1 | -1) => {
     const peers = getNodes().filter((n) => n.type === 'imagegen' && (n.data as GenNodeData)?.resultUrl);
@@ -312,7 +311,7 @@ export function ImageGenNode({ data, id }: NodeProps) {
             <ImageSettingsPanel
               value={settings}
               showQuality={supportsQuality}
-              onChange={(next) => updateNodeData(id, { size: next.size, quality: next.quality, n: next.n })}
+              onChange={(next) => updateNodeData(id, { size: next.size, quality: next.quality })}
             />
           ) : menuOpen ? (
             <NodeActionMenu

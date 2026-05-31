@@ -154,7 +154,6 @@ async function generateImage(body, jobId) {
   const opts = { model: body.model || 'google/nano-banana' };
   if (body.size) opts.size = body.size;
   if (body.quality) opts.quality = body.quality;
-  if (body.n) opts.n = body.n;
   const before = client.getSpending?.();
   const result = body.imageUrl
     ? await client.edit(body.prompt, body.imageUrl, opts)

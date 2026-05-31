@@ -9,7 +9,6 @@ export type ImageQuality = 'standard' | 'hd';
 export interface ImageSettings {
   size: ImageSize;
   quality: ImageQuality;
-  n: number;
 }
 
 interface Props {
@@ -91,16 +90,6 @@ export default function ImageSettingsPanel({ value, onChange, showQuality = true
           />
         </section>
       )}
-
-      <section className="panel-row">
-        <div className="panel-row-title">Variants</div>
-        <Segmented<number>
-          options={[1, 2, 3, 4]}
-          value={value.n}
-          onChange={(v) => onChange({ ...value, n: v })}
-          render={(v) => `${v}×`}
-        />
-      </section>
     </div>
   );
 }

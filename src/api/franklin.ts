@@ -168,8 +168,6 @@ export interface GenerateRequest {
   size?: string;
   /** Image: rendering quality where the model supports it (gpt-image-*). */
   quality?: 'standard' | 'hd';
-  /** Image: number of variants per call (1..4). */
-  n?: number;
   durationS?: number;
   lyrics?: string;
   instrumental?: boolean;

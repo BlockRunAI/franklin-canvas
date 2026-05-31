@@ -436,7 +436,6 @@ function CanvasInner() {
       // Image-only: size + quality + variants from the gear popover
       size?: '1024x1024' | '1024x1536' | '1536x1024' | '1024x1792' | '1792x1024';
       quality?: 'standard' | 'hd';
-      n?: number;
     };
 
     let cancelled = false;
@@ -475,7 +474,6 @@ function CanvasInner() {
       // Image-only gateway params from the node's gear popover.
       size: mode === 'imagegen' ? d.size : undefined,
       quality: mode === 'imagegen' ? d.quality : undefined,
-      n: mode === 'imagegen' ? d.n : undefined,
     });
     cancelled = true;
     clearInterval(tick);
