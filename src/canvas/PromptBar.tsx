@@ -16,7 +16,6 @@ import {
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS } from './nodes';
 import ModelDropdown from '../components/ModelDropdown';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
-import ImageSettingsPanel, { type ImageSettings, type ImageSize, type ImageQuality } from './ImageSettingsPanel';
 import { getWallet } from '../api/franklin';
 
 type Mode = 'imagegen' | 'videogen' | 'musicgen';
@@ -315,41 +314,22 @@ export default function PromptBar({ onSend }: Props) {
         </div>
         <div className="pb-divider" />
         <ModelDropdown models={meta.models} value={model} onChange={setModel} />
-        {/* Settings gear — Image: size/quality/variants · Video: aspect /
-            resolution / duration / audio. Hidden for music (handled inside
-            the music node's lyrics popover). */}
-        {(mode === 'imagegen' || mode === 'videogen') && (
+        {/* Settings gear — Video only (aspect / resolution / duration /
+            audio). Image generation has no per-call knobs worth exposing;
+            music settings live in the music node's lyrics popover. */}
+        {mode === 'videogen' && (
           <div className="pb-settings-wrap">
             <button
               type="button"
               className={`pb-icon-btn pb-settings-btn ${settingsOpen ? 'is-active' : ''}`}
               onClick={() => setSettingsOpen((v) => !v)}
-              aria-label="Open generation settings"
+              aria-label="Open video settings"
               aria-expanded={settingsOpen}
-              title="Generation settings"
+              title="Video settings"
             >
               <Settings2 size={20} strokeWidth={2.2} aria-hidden />
             </button>
-            {settingsOpen && mode === 'imagegen' && (() => {
-              const nd = selectedNode?.data as { size?: ImageSize; quality?: ImageQuality } | undefined;
-              const value: ImageSettings = {
-                size: nd?.size ?? '1024x1024',
-                quality: nd?.quality ?? 'standard',
-              };
-              const supportsQuality = model.startsWith('openai/gpt-image');
-              return (
-                <div className="pb-settings-pop">
-                  <ImageSettingsPanel
-                    value={value}
-                    showQuality={supportsQuality}
-                    onChange={(next) => {
-                      if (selectedId) updateNodeData(selectedId, { size: next.size, quality: next.quality });
-                    }}
-                  />
-                </div>
-              );
-            })()}
-            {settingsOpen && mode === 'videogen' && (() => {
+            {settingsOpen && (() => {
               const nd = selectedNode?.data as { mode?: 'standard' | 'pro'; ratio?: AspectRatio; durationS?: number; resolution?: '480p' | '720p' | '1080p'; audio?: boolean } | undefined;
               const value: VideoSettings = {
                 mode: nd?.mode ?? 'standard',

@@ -152,8 +152,6 @@ async function generateImage(body, jobId) {
   if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.');
   const client = new ImageClient({ privateKey, apiUrl });
   const opts = { model: body.model || 'google/nano-banana' };
-  if (body.size) opts.size = body.size;
-  if (body.quality) opts.quality = body.quality;
   const before = client.getSpending?.();
   const result = body.imageUrl
     ? await client.edit(body.prompt, body.imageUrl, opts)

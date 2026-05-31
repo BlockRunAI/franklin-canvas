@@ -433,9 +433,6 @@ function CanvasInner() {
       lyrics?: string;
       lyricsMode?: 'adaptive' | 'custom';
       referenceUrl?: string;
-      // Image-only: size + quality + variants from the gear popover
-      size?: '1024x1024' | '1024x1536' | '1536x1024' | '1024x1792' | '1792x1024';
-      quality?: 'standard' | 'hd';
     };
 
     let cancelled = false;
@@ -471,9 +468,6 @@ function CanvasInner() {
       aspectRatio: mode === 'videogen' ? d.ratio : undefined,
       resolution: mode === 'videogen' ? d.resolution : undefined,
       generateAudio: mode === 'videogen' ? d.audio : undefined,
-      // Image-only gateway params from the node's gear popover.
-      size: mode === 'imagegen' ? d.size : undefined,
-      quality: mode === 'imagegen' ? d.quality : undefined,
     });
     cancelled = true;
     clearInterval(tick);

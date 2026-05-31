@@ -1525,16 +1525,25 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .toolbar-btn.is-disabled { opacity: 0.4; cursor: not-allowed; }
 .toolbar-btn-dot { position: absolute; top: 7px; right: 7px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 
-/* corner delete */
+/* corner delete — always a solid dark pill so the contrast reads cleanly
+   on cream/white themes (rgba(0,0,0,0.5) over a near-white card came out
+   washed-grey and made the click feedback look "white"). Explicit hover
+   + active states so the browser's default focused-button white never
+   leaks through. */
 .node-corner-delete {
   position: absolute; top: 6px; right: 6px; z-index: 5; width: 22px; height: 22px; padding: 0;
-  border-radius: 7px; border: 0; background: rgba(0,0,0,0.5); color: rgba(255,255,255,0.85);
+  border-radius: 7px; border: 0;
+  background: rgba(20, 20, 24, 0.78); color: #fff;
   display: inline-flex; align-items: center; justify-content: center; opacity: 0;
-  transition: opacity 0.14s ease; cursor: pointer;
+  transition: opacity 0.14s ease, background-color 0.14s ease, transform 0.10s ease;
+  cursor: pointer;
 }
 .media-card:hover .node-corner-delete, .canvas-node:hover .node-corner-delete, .canvas-group:hover .node-corner-delete,
 .react-flow__node:hover .node-corner-delete, .react-flow__node.selected .node-corner-delete { opacity: 1; }
-.node-corner-delete:hover { background: rgba(239,68,68,0.85); color: #fff; }
+.node-corner-delete:hover { background: rgba(220, 38, 38, 0.92); color: #fff; }
+.node-corner-delete:active { background: rgba(185, 28, 28, 1); color: #fff; transform: scale(0.92); }
+.node-corner-delete:focus { outline: none; }
+.node-corner-delete:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 1px; }
 
 /* "+" side buttons */
 .node-add-side {

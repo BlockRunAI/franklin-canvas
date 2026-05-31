@@ -3,11 +3,10 @@
 
 import { Handle, NodeResizer, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { useEffect, useState, useRef } from 'react';
-import { Upload, ImageIcon, Film, Type, SquareDashed, Target, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus, ChevronLeft, ChevronRight, Download, Copy, Check, Settings2, MoreHorizontal } from 'lucide-react';
+import { Upload, ImageIcon, Film, Type, SquareDashed, Target, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus, ChevronLeft, ChevronRight, Download, Copy, Check } from 'lucide-react';
 import NodeFrame from './NodeFrame';
 import NodeActionMenu from './NodeActionMenu';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
-import ImageSettingsPanel, { type ImageSettings, type ImageSize, type ImageQuality } from './ImageSettingsPanel';
 import LyricsPanel, { type LyricsMode } from './LyricsPanel';
 import Lightbox from './Lightbox';
 import { useCanvasCtx } from './CanvasContext';
@@ -255,21 +254,12 @@ export function UploadNode({ data, id }: NodeProps) {
 // ── Image Gen ──
 export function ImageGenNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
-  const d = data as GenNodeData & { title?: string; size?: ImageSize; quality?: ImageQuality };
+  const d = data as GenNodeData & { title?: string };
   const [menuOpen, setMenuOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { updateNodeData, getNodes } = useReactFlow();
   const { runImageEdit, runImageSplit, runAnnotate } = useCanvasCtx();
-  // Quality only matters on the gpt-image-* models; nano-banana / grok-imagine
-  // ignore it. Hide the row instead of pretending it does anything.
-  const modelId = d.model ?? IMAGE_MODELS[0].id;
-  const supportsQuality = modelId.startsWith('openai/gpt-image');
-  const settings: ImageSettings = {
-    size: d.size ?? '1024x1024',
-    quality: d.quality ?? 'standard',
-  };
   const navLightbox = (dir: 1 | -1) => {
     const peers = getNodes().filter((n) => n.type === 'imagegen' && (n.data as GenNodeData)?.resultUrl);
     if (peers.length < 2) return;
@@ -299,21 +289,9 @@ export function ImageGenNode({ data, id }: NodeProps) {
         hasResult={!!d.resultUrl}
         onDownload={() => d.resultUrl && void downloadUrl(d.resultUrl, `${d.title || id}.png`)}
         onExpand={() => d.resultUrl && setLightboxSrc(d.resultUrl as string)}
-        // Two left-toolbar buttons: a gear for size/quality/variants and the
-        // existing More for image-edit actions (Outpaint / Enhance / etc).
-        // They're mutually exclusive — opening one closes the other.
-        toolbarLeft={[
-          { id: 'settings', iconComponent: Settings2, label: 'Image settings (size / quality)', onClick: () => { setSettingsOpen((v) => !v); setMenuOpen(false); } },
-          { id: 'more',     iconComponent: MoreHorizontal, label: 'Edit actions',              onClick: () => { setMenuOpen((v) => !v); setSettingsOpen(false); } },
-        ]}
+        onMore={() => setMenuOpen((v) => !v)}
         toolbarExtra={
-          settingsOpen ? (
-            <ImageSettingsPanel
-              value={settings}
-              showQuality={supportsQuality}
-              onChange={(next) => updateNodeData(id, { size: next.size, quality: next.quality })}
-            />
-          ) : menuOpen ? (
+          menuOpen ? (
             <NodeActionMenu
               imageReady={!!d.resultUrl}
               onItemClick={(item) => {
