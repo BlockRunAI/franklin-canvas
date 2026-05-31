@@ -767,7 +767,7 @@ function CanvasInner() {
 
       <CanvasContext.Provider value={{ openConnectMenu, runImageEdit, runImageSplit, runAnnotate }}>
       <div className="canvas-body">
-        <div className="canvas-flow" onClick={dismissPending}>
+        <div className={`canvas-flow ${showMinimap ? 'has-minimap' : ''}`} onClick={dismissPending}>
         <ReactFlow
           nodes={nodes}
           edges={edges}

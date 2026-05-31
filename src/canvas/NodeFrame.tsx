@@ -6,13 +6,13 @@
 // Each node type wraps its content in NodeFrame and can override the
 // toolbar items if needed.
 
-import { useReactFlow, NodeToolbar, Position } from '@xyflow/react';
+import { useReactFlow, useStore, NodeToolbar, Position } from '@xyflow/react';
 import {
   MoreHorizontal,
   FolderPlus, Download, Maximize2, CheckCircle2, Trash2,
   type LucideIcon,
 } from 'lucide-react';
-import { createElement, type ReactNode } from 'react';
+import { createElement, useState, type ReactNode } from 'react';
 import type { NodeStatus } from './nodes';
 
 export interface ToolbarItem {
@@ -96,8 +96,20 @@ export default function NodeFrame({
   const left = toolbarLeft ?? buildDefaultLeft(onMore);
   const right = toolbarRight ?? buildDefaultRight({ onDelete, onDownload, onExpand, hasResult });
 
+  // Toolbar visibility: appears on hover OR when the node is selected.
+  // Default NodeToolbar behavior only triggers on selected — but users
+  // expect to glance at the bar without committing to a click, so we OR
+  // hover into the mix.
+  const [hover, setHover] = useState(false);
+  const selected = useStore((s) => s.nodes.find((n) => n.id === id)?.selected ?? false);
+  const toolbarVisible = hover || selected;
+
   return (
-    <>
+    <div
+      className="node-frame-wrap"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
       {/* Title row, positioned above the card via CSS */}
       <div className="node-title-row">
         {Icon && (
@@ -118,8 +130,8 @@ export default function NodeFrame({
         )}
       </div>
 
-      {/* Floating pill toolbar — only when selected */}
-      <NodeToolbar position={Position.Top} offset={12} className="node-toolbar-pill">
+      {/* Floating pill toolbar — visible on hover OR when the node is selected. */}
+      <NodeToolbar isVisible={toolbarVisible} position={Position.Top} offset={12} className="node-toolbar-pill">
         <div className="node-toolbar-pill-row">
         <ul className="toolbar-group">
           {left.map((it) => (
@@ -160,6 +172,6 @@ export default function NodeFrame({
       </NodeToolbar>
 
       {children}
-    </>
+    </div>
   );
 }

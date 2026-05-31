@@ -24,7 +24,7 @@ export default function CanvasViewBar() {
 
   return (
     <div
-      className={`canvas-view-bar ${showMinimap ? 'is-above-minimap' : ''}`}
+      className="canvas-view-bar"
       role="toolbar"
       aria-label="Canvas view controls"
     >

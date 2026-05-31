@@ -1414,11 +1414,11 @@ button:active:not(:disabled) { transform: scale(0.97); }
   font-variant-numeric: tabular-nums;
 }
 
-/* When the minimap is visible, lift the bar above it (React Flow's default
-   minimap is ~150px tall + ~10px outer margin). When hidden, drop the bar
-   back down to its own 16px margin. Class is set in CanvasViewBar from the
-   showMinimap zustand pref (more reliable across browsers than :has()). */
-.canvas-view-bar.is-above-minimap { bottom: 176px; }
+/* View bar always sits at the bottom-right corner; when the minimap is
+   visible, lift the MINIMAP above the bar instead so the bar stays where
+   the cursor naturally lands. Class is set on the canvas-flow wrapper
+   from the showMinimap zustand pref. */
+.canvas-flow.has-minimap .react-flow__minimap { bottom: 64px !important; }
 
 /* Wallet pill in the top toolbar — clickable, opens Settings → Wallet. */
 .canvas-wallet-btn {
@@ -1484,6 +1484,10 @@ button:active:not(:disabled) { transform: scale(0.97); }
 
 /* ── Node card wrap + handles ── */
 .canvas-card-wrap { position: relative; display: flex; flex-direction: column; align-items: stretch; width: max-content; }
+/* Inherits layout from canvas-card-wrap so the hover wrapper is invisible to
+   the existing flex tree — just provides a single mouse target for toolbar
+   visibility. */
+.node-frame-wrap { display: contents; }
 .react-flow__handle { background: transparent !important; border: none !important; width: 14px !important; height: 14px !important; opacity: 0; }
 .react-flow__handle-right { right: 0 !important; }
 .react-flow__handle-left { left: 0 !important; }
