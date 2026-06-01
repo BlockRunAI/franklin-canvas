@@ -241,6 +241,76 @@ export async function agentPlan(
   }
 }
 
+// ─── Real tool-calling agent (OpenAI-style function calling) ──────────────────
+// The loop runs on the FRONTEND: agentChat() does one model turn (may return
+// tool_calls), the panel executes them (canvas tools in-browser, the rest via
+// agentTool()), then calls agentChat() again with the results appended.
+
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+export interface ChatTurn {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content?: string | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+  name?: string;
+}
+export interface AgentChatResult {
+  ok: true;
+  message: { role: 'assistant'; content?: string | null; tool_calls?: ToolCall[] };
+  finish_reason: string;
+}
+
+export async function agentChat(model: string | undefined, messages: ChatTurn[]): Promise<AgentChatResult | GenerateError> {
+  try {
+    const r = await fetch(`${base}/agent/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, messages }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false) return { ok: false, error: data?.error || `agent failed (${r.status})` };
+    return { ok: true, message: data.message, finish_reason: data.finish_reason };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message || 'network error' };
+  }
+}
+
+// Execute one BACKEND tool (web / memory / MoA / utility / filesystem / bash).
+export async function agentTool(name: string, input: Record<string, unknown>): Promise<{ output: string; isError?: boolean }> {
+  try {
+    const r = await fetch(`${base}/agent/tool`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, input }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false) return { output: data?.error || `tool failed (${r.status})`, isError: true };
+    return { output: String(data.output ?? ''), isError: !!data.isError };
+  } catch (err) {
+    return { output: (err as Error).message || 'network error', isError: true };
+  }
+}
+
+// Vision: describe an image (or a captured video frame) via the gateway.
+export async function describeMedia(imageUrl: string, question?: string): Promise<{ ok: true; text: string } | GenerateError> {
+  try {
+    const r = await fetch(`${base}/describe`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ imageUrl, question }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false) return { ok: false, error: data?.error || `describe failed (${r.status})` };
+    return { ok: true, text: data.text as string };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message || 'network error' };
+  }
+}
+
 export interface StitchItem { url: string; label: string; labelPng?: string }
 export type StitchMode = 'grid' | 'sequence';
 export type StitchOrientation = 'landscape' | 'portrait';

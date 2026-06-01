@@ -15,7 +15,8 @@ import PromptLibrary from '../canvas/PromptLibrary';
 type JobStatus = 'idle' | 'running' | 'done' | 'error';
 interface Job { model: string; label: string; status: JobStatus; resultUrl?: string; error?: string; elapsedS: number }
 
-const DURATIONS = [3, 5, 8, 10];
+// 4 and 8 are the durations Sora 2 accepts (4/8/12); 4 lets it join a comparison.
+const DURATIONS = [3, 4, 5, 8, 10];
 const DEFAULT_MODELS = VIDEO_MODELS.slice(0, 4).map((m) => m.id);
 
 // Draw a model label to a small transparent PNG (proper fonts via the browser),

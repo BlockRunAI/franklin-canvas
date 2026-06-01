@@ -32,6 +32,7 @@ import {
   extractPaymentDetails,
   createPaymentPayload,
 } from '@blockrun/llm';
+import { runAgentChat, runBackendTool, describeMedia, CANVAS_TOOL_NAMES } from './agent-tools.mjs';
 
 const PORT = 3100;
 const apiUrl = process.env.BLOCKRUN_API_URL || undefined;
@@ -382,8 +383,10 @@ async function getPromptDetail(relPath) {
 // Composite N model videos into one grid MP4 with per-cell labels. Label PNGs
 // are rendered by the browser (proper fonts, no backend font deps) and passed
 // in as data: URLs. Layouts: 2→1×2, 3→1×3, 4→2×2, 5→2×3 (last cell black).
-const CMP_CELL_W = 640;
-const CMP_CELL_H = 360;
+// Cell at 960×540 keeps each clip near its source 720p (2×2 → 1080p output)
+// instead of the old 640×360 quarter-res cells.
+const CMP_CELL_W = 960;
+const CMP_CELL_H = 540;
 const CMP_LAYOUTS = { 2: [2, 1], 3: [3, 1], 4: [2, 2], 5: [3, 2] };
 
 function runFfmpeg(args) {
@@ -445,8 +448,9 @@ async function stitchComparison(items, mode = 'grid', orientation = 'landscape')
   // a 1280/N-tall band (letterboxed) so the whole thing stays phone-shaped
   // instead of growing endlessly long. Landscape uses the 640×360 grid cell.
   // Dimensions must be even for yuv420p/libx264.
-  const cellW = portrait ? 720 : CMP_CELL_W;
-  const cellH = portrait ? (Math.round(1280 / n) - (Math.round(1280 / n) % 2)) : CMP_CELL_H;
+  // Portrait fills a 1080×1920 phone frame; each clip gets a 1920/N band.
+  const cellW = portrait ? 1080 : CMP_CELL_W;
+  const cellH = portrait ? (Math.round(1920 / n) - (Math.round(1920 / n) % 2)) : CMP_CELL_H;
   const jobId = `cmp_${crypto.randomUUID()}`;
   const tmp = path.join(JOBS_DIR, jobId + '_tmp');
   fs.mkdirSync(tmp, { recursive: true });
@@ -540,7 +544,7 @@ async function stitchComparison(items, mode = 'grid', orientation = 'landscape')
     }
 
     const outPath = path.join(JOBS_DIR, `${jobId}.mp4`);
-    await runFfmpeg(['-y', ...inputs, '-filter_complex', fc, '-map', `[${outLabel}]`, ...audioArgs, '-movflags', '+faststart', '-pix_fmt', 'yuv420p', outPath]);
+    await runFfmpeg(['-y', ...inputs, '-filter_complex', fc, '-map', `[${outLabel}]`, ...audioArgs, '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', outPath]);
     return { resultUrl: `/api/generated/${jobId}.mp4` };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -766,6 +770,61 @@ const server = http.createServer(async (req, res) => {
         return json(req, res, { ok: true, ...plan });
       } catch (err) {
         console.warn(`[agent] plan FAIL: ${err.message || err}`);
+        return json(req, res, { ok: false, error: err.message || String(err) }, 502);
+      }
+    }
+
+    // ── Real tool-calling agent ──
+    // One turn of the loop: the frontend posts the running conversation; we
+    // prepend the system prompt, hand the tools to the gateway, and return the
+    // assistant message (which may contain tool_calls). The frontend executes
+    // the calls and posts back the next turn. See agent-tools.mjs.
+    if (p === '/api/agent/chat' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      try {
+        const { privateKey, address } = getWallet();
+        if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.' }, 400);
+        const out = await runAgentChat({ model: body.model, messages: body.messages }, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        return json(req, res, { ok: true, ...out });
+      } catch (err) {
+        console.warn(`[agent] chat FAIL: ${err.message || err}`);
+        return json(req, res, { ok: false, error: err.message || String(err) }, 502);
+      }
+    }
+
+    // Execute one BACKEND tool (web / memory / MoA / utility / filesystem / bash).
+    // Canvas/media tools are executed in the browser and never reach here.
+    if (p === '/api/agent/tool' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      const name = body.name;
+      if (CANVAS_TOOL_NAMES.has(name)) return json(req, res, { ok: false, error: `${name} is a canvas tool (executed client-side)` }, 400);
+      try {
+        const { privateKey, address } = getWallet();
+        const output = await runBackendTool(name, body.input || {}, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        return json(req, res, { ok: true, output: String(output ?? '') });
+      } catch (err) {
+        // Tool errors are non-fatal — the model sees them as an is_error result.
+        return json(req, res, { ok: true, output: `Error: ${err.message || String(err)}`, isError: true });
+      }
+    }
+
+    // Vision: look at an image (or a video frame the client captured) and return
+    // a textual description. Backs the describe_media canvas tool.
+    if (p === '/api/describe' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      try {
+        const { privateKey, address } = getWallet();
+        if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found.' }, 400);
+        const text = await describeMedia({ imageUrl: body.imageUrl, question: body.question }, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        return json(req, res, { ok: true, text });
+      } catch (err) {
+        console.warn(`[agent] describe FAIL: ${err.message || err}`);
         return json(req, res, { ok: false, error: err.message || String(err) }, 502);
       }
     }

@@ -21,7 +21,6 @@ import { NODE_TYPES, NODE_CATALOG, CATEGORY_TITLES, IMAGE_MODELS, VIDEO_MODELS, 
 import AgentPanel from '../canvas/AgentPanel';
 import AgentMascot from '../components/AgentMascot';
 import { useAgentPrefs } from '../canvas/agentPrefsStore';
-import { type PlanStep } from '../api/franklin';
 import { EDGE_TYPES } from '../canvas/edges';
 import PromptBar from '../canvas/PromptBar';
 import PromptLibrary from '../canvas/PromptLibrary';
@@ -31,7 +30,8 @@ import { type FavItem } from '../collectionsStore';
 import CanvasViewBar from '../canvas/CanvasViewBar';
 import { usePrefsStore } from '../canvas/prefsStore';
 import { CanvasContext, type ImageEditOp } from '../canvas/CanvasContext';
-import { generate } from '../api/franklin';
+import { generate, stitchComparison, describeMedia, type StitchItem } from '../api/franklin';
+import type { CanvasAgentApi } from '../canvas/agentTools';
 import { getOrCreateCurrent, saveProjectCanvas, renameProject } from '../projects';
 import { useUiStore } from '../uiStore';
 import { useThemeStore } from '../canvas/themeStore';
@@ -179,7 +179,7 @@ function CanvasInner() {
   const minimapMask = theme === 'dark' ? 'rgba(7,7,10,0.85)' : 'rgba(255,255,255,0.7)';
   const connectStartFrom = useRef<string | null>(null);
   const idCounter = useRef(100);
-  const { screenToFlowPosition, getNode, fitView } = useReactFlow();
+  const { screenToFlowPosition, getNode, getNodes, fitView } = useReactFlow();
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge({ ...params, type: 'flow' }, eds)),
@@ -424,40 +424,6 @@ function CanvasInner() {
   // The agent panel hands us a plan; we materialize each step as a real node on
   // the canvas (positioned left-to-right, wired to its `from` source) so the
   // workflow is visible as it builds, then run the generation per step.
-  const agentCreateStep = useCallback((step: PlanStep, fromNodeId: string | null, index: number): string => {
-    const id = `n${idCounter.current++}`;
-    // Use the user's configured default model for each step type so the choice
-    // in Settings is what actually runs (the planner's suggestion is ignored).
-    const model = step.type === 'imagegen' ? agentImageModel
-                : step.type === 'videogen' ? agentVideoModel
-                : MUSIC_MODELS[0].id;
-    const data: Record<string, unknown> = {
-      title: step.title || step.type,
-      model,
-      prompt: step.prompt,
-      priceUsd: 0,
-      status: 'idle' as NodeStatus,
-    };
-    if (step.type === 'videogen') { data.durationS = step.durationS ?? 5; data.ratio = '16:9'; data.resolution = '720p'; data.audio = true; }
-    if (step.type === 'musicgen') data.durationS = step.durationS ?? 8;
-    const newNode: Node = { id, type: step.type, position: { x: 220 + index * 360, y: 160 }, data, selected: true };
-    setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode]);
-    if (fromNodeId) {
-      setEdges((eds) => addEdge({ id: `e-${fromNodeId}-${id}`, source: fromNodeId, target: id, sourceHandle: `${fromNodeId}-out`, targetHandle: `${id}-in`, type: 'flow' }, eds));
-    }
-    // Frame the freshly-built workflow so it's visible as the agent works.
-    // Pad extra on the right so nodes don't hide under the agent panel.
-    setTimeout(() => fitView({ padding: 0.35, duration: 400, maxZoom: 1 }), 90);
-    return id;
-  }, [setNodes, setEdges, fitView, agentImageModel, agentVideoModel]);
-
-  const agentRunStep = useCallback(async (nodeId: string, step: PlanStep, prevResultUrl?: string) => {
-    // Image edits / image→video use the previous step's output as the reference.
-    const ref = step.from ? prevResultUrl : undefined;
-    return simulateGen(nodeId, step.type, step.prompt, ref);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Normalize a reference image into a downscaled JPEG data: URI for the
   // gateway. References arrive as data: URIs (uploads), relative URLs
   // (/api/generated/… for generated images), or http(s) URLs. The gateway
@@ -730,6 +696,110 @@ function CanvasInner() {
     img.src = sourceImage;
   }, [getNode, setNodes]);
 
+  // ── Media Agent: the canvas tool API ──
+  // Implements the tools the agent's tool-calling loop executes in-browser
+  // (create/chain/edit/upscale/stitch/describe/list nodes). Backend tools (web,
+  // memory, filesystem, bash…) are dispatched separately in agentTools.ts.
+
+  // Grab a video's first frame as a JPEG data URL (for describe_media on videos).
+  const captureVideoFrame = (url: string): Promise<string> => new Promise((resolve, reject) => {
+    const v = document.createElement('video');
+    v.crossOrigin = 'anonymous'; v.muted = true; v.preload = 'metadata'; v.src = url;
+    v.onloadeddata = () => { try { v.currentTime = Math.min(0.1, (v.duration || 1) - 0.01); } catch { /* ignore */ } };
+    v.onseeked = () => {
+      const c = document.createElement('canvas');
+      c.width = v.videoWidth || 640; c.height = v.videoHeight || 360;
+      const ctx = c.getContext('2d');
+      if (!ctx) return reject(new Error('no 2d ctx'));
+      ctx.drawImage(v, 0, 0, c.width, c.height);
+      try { resolve(c.toDataURL('image/jpeg', 0.85)); } catch (e) { reject(e as Error); }
+    };
+    v.onerror = () => reject(new Error('video load failed'));
+  });
+
+  // Position a new node to the right of its source, or cascade if standalone.
+  const placeAgentNode = (fromNodeId?: string): { x: number; y: number } => {
+    if (fromNodeId) {
+      const s = getNode(fromNodeId);
+      if (s) {
+        const w = (s.measured?.width ?? s.width ?? 280);
+        return { x: s.position.x + w + 110, y: s.position.y };
+      }
+    }
+    const n = getNodes().length;
+    return { x: 220 + (n % 5) * 360, y: 160 + Math.floor(n / 5) * 340 };
+  };
+
+  const agentApi: CanvasAgentApi = {
+    async generate(kind, args) {
+      const refId = args.fromNodeId || args.referenceNodeId;
+      let refUrl: string | undefined;
+      if (refId) {
+        const rd = getNode(refId)?.data as { resultUrl?: string; imageUrl?: string } | undefined;
+        refUrl = rd?.resultUrl || rd?.imageUrl;
+      }
+      const id = `n${idCounter.current++}`;
+      const model = args.model
+        || (kind === 'imagegen' ? agentImageModel : kind === 'videogen' ? agentVideoModel : MUSIC_MODELS[0].id);
+      const data: Record<string, unknown> = { title: kind, model, prompt: args.prompt, priceUsd: 0, status: 'idle' as NodeStatus, referenceUrl: refUrl };
+      if (kind === 'videogen') { data.durationS = args.durationS ?? 5; data.ratio = args.aspectRatio || '16:9'; data.resolution = args.resolution || '720p'; data.audio = args.audio !== false; }
+      if (kind === 'musicgen') { data.durationS = args.durationS ?? 8; if (args.lyrics) { data.lyrics = args.lyrics; data.lyricsMode = 'custom'; } if (args.instrumental != null) data.instrumental = args.instrumental; }
+      const newNode: Node = { id, type: kind, position: placeAgentNode(refId), data, selected: true };
+      setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode]);
+      if (refId) setEdges((eds) => addEdge({ id: `e-${refId}-${id}`, source: refId, target: id, sourceHandle: `${refId}-out`, targetHandle: `${id}-in`, type: 'flow' }, eds));
+      setTimeout(() => fitView({ padding: 0.35, duration: 400, maxZoom: 1 }), 90);
+      const res = await simulateGen(id, kind, args.prompt, refUrl);
+      return res.ok ? { ok: true, nodeId: id, resultUrl: res.resultUrl } : { ok: false, error: res.error };
+    },
+    async editImage({ nodeId, prompt, model }) {
+      const sd = getNode(nodeId)?.data as { resultUrl?: string; imageUrl?: string } | undefined;
+      if (!(sd?.resultUrl || sd?.imageUrl)) return { ok: false, error: `node ${nodeId} has no image` };
+      return agentApi.generate('imagegen', { prompt, model, referenceNodeId: nodeId });
+    },
+    async upscaleImage(nodeId) {
+      return agentApi.editImage({ nodeId, prompt: IMAGE_EDIT_PROMPTS.pixels });
+    },
+    async stitchVideos(nodeIds, mode, orientation) {
+      const items: StitchItem[] = [];
+      for (const nid of nodeIds) {
+        const d = getNode(nid)?.data as { resultUrl?: string; model?: string; title?: string } | undefined;
+        if (d?.resultUrl) items.push({ url: d.resultUrl, label: d.model || d.title || nid });
+      }
+      if (!items.length) return { ok: false, error: 'none of those nodes has a finished video' };
+      const r = await stitchComparison(items, mode, orientation);
+      if (!r.ok) return { ok: false, error: r.error };
+      const id = `n${idCounter.current++}`;
+      const newNode: Node = {
+        id, type: 'videogen', position: placeAgentNode(nodeIds[0]),
+        data: { title: 'Stitched', model: 'ffmpeg', prompt: `Combined ${items.length} clips (${mode}/${orientation})`, status: 'done' as NodeStatus, resultUrl: r.resultUrl, progress: 1 },
+      };
+      setNodes((nds) => [...nds, newNode]);
+      setTimeout(() => fitView({ padding: 0.35, duration: 400, maxZoom: 1 }), 90);
+      return { ok: true, nodeId: id, resultUrl: r.resultUrl };
+    },
+    async describe(nodeId, question) {
+      const n = getNode(nodeId);
+      const d = n?.data as { resultUrl?: string; imageUrl?: string } | undefined;
+      const url = d?.resultUrl || d?.imageUrl;
+      if (!url) return { ok: false, error: `node ${nodeId} has no media` };
+      let imageUrl = url;
+      if (n?.type === 'videogen' || /\.mp4(\?|$)/.test(url)) {
+        const frame = await captureVideoFrame(url).catch(() => undefined);
+        if (frame) imageUrl = frame;
+      }
+      const r = await describeMedia(imageUrl, question);
+      return r.ok ? { ok: true, text: r.text } : { ok: false, error: r.error };
+    },
+    listCanvas() {
+      return getNodes().map((n) => {
+        const d = n.data as { title?: string; label?: string; prompt?: string; resultUrl?: string; imageUrl?: string };
+        const hasResult = !!(d.resultUrl || d.imageUrl);
+        const resultKind = n.type === 'videogen' ? 'video' : n.type === 'musicgen' ? 'music' : 'image';
+        return { nodeId: n.id, type: String(n.type), title: String(d.title || d.label || n.type), prompt: String(d.prompt || ''), hasResult, resultKind: hasResult ? (resultKind as 'image' | 'video' | 'music') : undefined };
+      });
+    },
+  };
+
   // ── Annotate: open a modal canvas pre-loaded with the source image; on
   // save, drop a new upload node next to the source carrying the annotated
   // PNG. Pure client-side; no model call.
@@ -938,8 +1008,7 @@ function CanvasInner() {
       <AgentPanel
         open={agentOpen}
         onClose={() => setAgentOpen(false)}
-        createStep={agentCreateStep}
-        runStep={agentRunStep}
+        api={agentApi}
       />
       <AnnotateModal
         open={!!annotateSrc}
