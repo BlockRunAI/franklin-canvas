@@ -1851,18 +1851,34 @@ body.is-previewing .connect-menu,
 body.is-previewing .video-settings-panel,
 body.is-previewing .lyrics-panel { display: none !important; }
 
+/* Fit mode (default): image obeys max-w/h, sits centered. */
 .lightbox-stage {
   width: 100vw; height: 100vh;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
-  user-select: none; touch-action: none;
+  user-select: none;
 }
 .lightbox-media {
   max-width: 92vw; max-height: 90vh;
   border-radius: 12px; object-fit: contain;
-  pointer-events: none; /* drag is captured by .lightbox-stage */
 }
-.lightbox-audio { width: 70vw; pointer-events: auto; }
+
+/* Zoom mode (after click): image at natural pixels, stage scrolls. The
+   `padding` keeps the image clear of the close button + nav arrows.
+   block + margin: auto re-centers if the natural size is smaller than
+   the viewport. */
+.lightbox-stage.is-zoomed {
+  display: block;
+  overflow: auto;
+  padding: 80px 24px;
+}
+.lightbox-stage.is-zoomed .lightbox-media {
+  max-width: none; max-height: none;
+  display: block; margin: 0 auto;
+  border-radius: 0;
+}
+
+.lightbox-audio { width: 70vw; }
 .lightbox-close {
   position: absolute; top: 20px; right: 24px;
   width: 40px; height: 40px; border-radius: 50%; border: 0;
