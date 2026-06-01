@@ -190,18 +190,80 @@ export interface GenerateError {
   toolOutput?: string;
 }
 
-export async function generate(req: GenerateRequest): Promise<GenerateResult | GenerateError> {
+export async function generate(req: GenerateRequest, signal?: AbortSignal): Promise<GenerateResult | GenerateError> {
   try {
     const r = await fetch(`${base}/generate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(req),
+      signal,
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data?.ok === false) {
       return { ok: false, error: data?.error || `daemon returned ${r.status}` };
     }
     return { ok: true, resultUrl: data.resultUrl as string, message: data.message };
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') return { ok: false, error: 'cancelled' };
+    return { ok: false, error: (err as Error).message || 'network error' };
+  }
+}
+
+export interface PlanStep {
+  id: string;
+  type: 'imagegen' | 'videogen' | 'musicgen';
+  title?: string;
+  prompt: string;
+  model?: string;
+  from?: string | null;
+  durationS?: number;
+}
+export interface AgentMsg { role: 'user' | 'assistant'; content: string }
+
+// Ask the agent to plan a media workflow for the user's request. Returns a
+// friendly message + a chain of generation steps the canvas builds and runs.
+export async function agentPlan(
+  prompt: string,
+  history: AgentMsg[] = [],
+  model?: string,
+): Promise<{ ok: true; message: string; steps: PlanStep[] } | GenerateError> {
+  try {
+    const r = await fetch(`${base}/agent/plan`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt, history, model }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false) return { ok: false, error: data?.error || `agent failed (${r.status})` };
+    return { ok: true, message: data.message as string, steps: (data.steps ?? []) as PlanStep[] };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message || 'network error' };
+  }
+}
+
+export interface StitchItem { url: string; label: string; labelPng?: string }
+export type StitchMode = 'grid' | 'sequence';
+export type StitchOrientation = 'landscape' | 'portrait';
+
+// Composite N comparison videos into one MP4 server-side (ffmpeg).
+//   mode: grid (all play at once) | sequence (one at a time, others frozen)
+//   orientation: landscape (grid) | portrait (stacked top-to-bottom, TikTok)
+export async function stitchComparison(
+  items: StitchItem[],
+  mode: StitchMode = 'grid',
+  orientation: StitchOrientation = 'landscape',
+): Promise<GenerateResult | GenerateError> {
+  try {
+    const r = await fetch(`${base}/comparison/stitch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ items, mode, orientation }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false) {
+      return { ok: false, error: data?.error || `stitch failed (${r.status})` };
+    }
+    return { ok: true, resultUrl: data.resultUrl as string };
   } catch (err) {
     return { ok: false, error: (err as Error).message || 'network error' };
   }

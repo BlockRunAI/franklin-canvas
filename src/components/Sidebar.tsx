@@ -4,8 +4,8 @@
 // width animates between expanded (240px) and collapsed (56px); labels fade.
 
 import {
-  Workflow, LayoutGrid, Wallet as WalletIcon, Settings, Sparkles,
-  LibraryBig, PanelLeftClose, PanelLeftOpen,
+  Workflow, LayoutGrid, Wallet as WalletIcon, Settings,
+  LibraryBig, Columns3, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import type { Route } from '../types';
 import { useT, type StringKey } from '../i18n';
@@ -15,8 +15,9 @@ type SettingsSection = 'wallet' | 'models' | 'canvas' | 'about';
 
 interface NavItem { id: Route; labelKey: StringKey; Icon: typeof Workflow; }
 const ITEMS: NavItem[] = [
-  { id: 'canvas',   labelKey: 'sidebar_canvas',   Icon: Workflow },
-  { id: 'projects', labelKey: 'sidebar_projects', Icon: LayoutGrid },
+  { id: 'canvas',     labelKey: 'sidebar_canvas',     Icon: Workflow },
+  { id: 'comparison', labelKey: 'sidebar_comparison', Icon: Columns3 },
+  { id: 'projects',   labelKey: 'sidebar_projects',   Icon: LayoutGrid },
 ];
 
 interface Props {
@@ -37,7 +38,7 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
     >
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark">
-          <Sparkles size={18} className="brand-icon" aria-hidden />
+          <img src="/franklin-canvas-icon.png" className="brand-logo" alt="" aria-hidden />
           <span>{t('sidebar_brand')}</span>
         </span>
         {onToggleCollapse && (

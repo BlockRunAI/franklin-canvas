@@ -5,16 +5,17 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  X, Wallet, Boxes, Info, Copy, Check, ExternalLink, SlidersHorizontal, type LucideIcon,
+  X, Wallet, Boxes, Info, Copy, Check, ExternalLink, SlidersHorizontal, Bot, type LucideIcon,
 } from 'lucide-react';
 import { getWallet } from '../api/franklin';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, TEXT_MODELS } from './nodes';
 import { usePrefsStore, type EdgeStyle } from './prefsStore';
+import { useAgentPrefs, type AgentMode } from './agentPrefsStore';
 import { useThemeStore, type Theme } from './themeStore';
 import { useLocaleStore, useT, LOCALES, type Locale, type StringKey } from '../i18n';
 import type { WalletInfo, WalletChain } from '../types';
 
-type SectionId = 'wallet' | 'models' | 'canvas' | 'about';
+type SectionId = 'wallet' | 'models' | 'canvas' | 'agent' | 'about';
 
 interface NavItem { id: SectionId; labelKey: StringKey; icon: LucideIcon; }
 
@@ -22,6 +23,7 @@ const NAV: NavItem[] = [
   { id: 'wallet', labelKey: 'settings_section_wallet', icon: Wallet },
   { id: 'models', labelKey: 'settings_section_models', icon: Boxes },
   { id: 'canvas', labelKey: 'settings_section_canvas', icon: SlidersHorizontal },
+  { id: 'agent',  labelKey: 'settings_section_agent',  icon: Bot },
   { id: 'about',  labelKey: 'settings_section_about',  icon: Info },
 ];
 
@@ -264,6 +266,10 @@ function AboutPane() {
   return (
     <div className="settings-pane-section">
       <h2>{t('settings_section_about')}</h2>
+      <div className="settings-about-brand">
+        <img src="/franklin-canvas-icon.png" alt="" aria-hidden />
+        <span>Franklin Canvas</span>
+      </div>
       <p className="settings-foot-note">{t('about_blurb')}</p>
       <dl className="settings-kv">
         <div><dt>{t('about_version')}</dt><dd>0.0.1</dd></div>
@@ -286,10 +292,79 @@ function AboutPane() {
   );
 }
 
+function AgentPane() {
+  const t = useT();
+  const mode = useAgentPrefs((s) => s.mode);
+  const setMode = useAgentPrefs((s) => s.setMode);
+  const imageModel = useAgentPrefs((s) => s.imageModel);
+  const setImageModel = useAgentPrefs((s) => s.setImageModel);
+  const videoModel = useAgentPrefs((s) => s.videoModel);
+  const setVideoModel = useAgentPrefs((s) => s.setVideoModel);
+
+  const modeOptions: { id: AgentMode; labelKey: StringKey; hintKey: StringKey }[] = [
+    { id: 'manual', labelKey: 'agent_mode_manual', hintKey: 'agent_mode_manual_hint' },
+    { id: 'auto',   labelKey: 'agent_mode_auto',   hintKey: 'agent_mode_auto_hint' },
+  ];
+
+  return (
+    <div className="settings-pane-section">
+      <h2>{t('settings_section_agent')}</h2>
+
+      <h3 className="settings-subhead">{t('agent_mode')}</h3>
+      <div className="settings-choices">
+        {modeOptions.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            className={`settings-choice ${mode === o.id ? 'is-active' : ''}`}
+            onClick={() => setMode(o.id)}
+          >
+            <span className="settings-choice-label">{t(o.labelKey)}</span>
+            <span className="settings-choice-hint">{t(o.hintKey)}</span>
+          </button>
+        ))}
+      </div>
+
+      <h3 className="settings-subhead">{t('agent_default_image')}</h3>
+      <div className="settings-choices settings-choices-compact">
+        {IMAGE_MODELS.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            className={`settings-choice ${imageModel === m.id ? 'is-active' : ''}`}
+            onClick={() => setImageModel(m.id)}
+          >
+            <span className="settings-choice-label">{m.label}</span>
+            <span className="settings-choice-hint">${m.price.toFixed(2)} / image</span>
+          </button>
+        ))}
+      </div>
+
+      <h3 className="settings-subhead">{t('agent_default_video')}</h3>
+      <div className="settings-choices settings-choices-compact">
+        {VIDEO_MODELS.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            className={`settings-choice ${videoModel === m.id ? 'is-active' : ''}`}
+            onClick={() => setVideoModel(m.id)}
+          >
+            <span className="settings-choice-label">{m.label}</span>
+            <span className="settings-choice-hint">${m.pricePerS.toFixed(3)} / sec</span>
+          </button>
+        ))}
+      </div>
+
+      <p className="settings-foot-note">{t('agent_models_hint')}</p>
+    </div>
+  );
+}
+
 const PANES: Record<SectionId, ReactNode> = {
   wallet: <WalletPane />,
   models: <ModelsPane />,
   canvas: <CanvasPane />,
+  agent: <AgentPane />,
   about: <AboutPane />,
 };
 

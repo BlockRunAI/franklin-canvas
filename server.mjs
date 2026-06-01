@@ -17,6 +17,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { Buffer } from 'node:buffer';
 import {
   LLMClient,
@@ -376,6 +378,259 @@ async function getPromptDetail(relPath) {
   return { title, prompt, image };
 }
 
+// ── Comparison stitch (ffmpeg) ──
+// Composite N model videos into one grid MP4 with per-cell labels. Label PNGs
+// are rendered by the browser (proper fonts, no backend font deps) and passed
+// in as data: URLs. Layouts: 2→1×2, 3→1×3, 4→2×2, 5→2×3 (last cell black).
+const CMP_CELL_W = 640;
+const CMP_CELL_H = 360;
+const CMP_LAYOUTS = { 2: [2, 1], 3: [3, 1], 4: [2, 2], 5: [3, 2] };
+
+function runFfmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', args);
+    let err = '';
+    ff.stderr.on('data', (d) => { err += d.toString(); });
+    ff.on('error', reject);
+    ff.on('close', (code) => (code === 0 ? resolve() : reject(new Error('ffmpeg failed: ' + err.slice(-500)))));
+  });
+}
+
+// Map a /api/generated/<file> URL to its local path; remote URLs return null
+// (the caller downloads them into the temp dir).
+function localGeneratedPath(url) {
+  if (typeof url !== 'string') throw new Error('bad video url');
+  if (url.startsWith('/api/generated/')) {
+    const f = path.basename(url.slice('/api/generated/'.length).split('?')[0]);
+    const fp = path.join(JOBS_DIR, f);
+    if (!fs.existsSync(fp)) throw new Error('source video not found');
+    return fp;
+  }
+  return null;
+}
+
+function probeDuration(file) {
+  return new Promise((resolve) => {
+    const pp = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', file]);
+    let out = '';
+    pp.stdout.on('data', (d) => { out += d.toString(); });
+    pp.on('close', () => resolve(parseFloat(out) || 0));
+    pp.on('error', () => resolve(0));
+  });
+}
+
+function probeHasAudio(file) {
+  return new Promise((resolve) => {
+    const pp = spawn('ffprobe', ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', file]);
+    let out = '';
+    pp.stdout.on('data', (d) => { out += d.toString(); });
+    pp.on('close', () => resolve(out.trim().length > 0));
+    pp.on('error', () => resolve(false));
+  });
+}
+
+// mode 'grid' (default): all cells play simultaneously.
+// mode 'sequence': cells play one at a time in order — the active cell plays
+// while the others hold a frozen frame (first frame before their turn, last
+// frame after) — the classic side-by-side model-comparison reel.
+async function stitchComparison(items, mode = 'grid', orientation = 'landscape') {
+  const n = items.length;
+  if (n < 2 || n > 5) throw new Error('need 2–5 videos');
+  // landscape → grid (2×2 etc); portrait → single column stacked top-to-bottom
+  // for a TikTok-style reel.
+  const portrait = orientation === 'portrait';
+  const cols = portrait ? 1 : CMP_LAYOUTS[n][0];
+  const rows = portrait ? n : CMP_LAYOUTS[n][1];
+  // Portrait fits the stack into a 9:16 phone frame (720×1280): each clip gets
+  // a 1280/N-tall band (letterboxed) so the whole thing stays phone-shaped
+  // instead of growing endlessly long. Landscape uses the 640×360 grid cell.
+  // Dimensions must be even for yuv420p/libx264.
+  const cellW = portrait ? 720 : CMP_CELL_W;
+  const cellH = portrait ? (Math.round(1280 / n) - (Math.round(1280 / n) % 2)) : CMP_CELL_H;
+  const jobId = `cmp_${crypto.randomUUID()}`;
+  const tmp = path.join(JOBS_DIR, jobId + '_tmp');
+  fs.mkdirSync(tmp, { recursive: true });
+  try {
+    // Resolve videos to local files (download remotes); write label PNGs.
+    const videoPaths = [];
+    const labelPaths = [];
+    for (let i = 0; i < n; i++) {
+      const it = items[i] || {};
+      let vp = localGeneratedPath(it.url);
+      if (!vp) { const { ext } = await downloadTo(it.url, path.join(tmp, `v${i}`), 'mp4'); vp = path.join(tmp, `v${i}.${ext}`); }
+      videoPaths.push(vp);
+      const m = /^data:image\/png;base64,(.+)$/s.exec(it.labelPng || '');
+      if (m) { const lp = path.join(tmp, `l${i}.png`); fs.writeFileSync(lp, Buffer.from(m[1], 'base64')); labelPaths.push(lp); }
+      else labelPaths.push(null);
+    }
+
+    // Sequence mode needs a fixed per-cell slot length = the longest clip.
+    let slot = 0;
+    if (mode === 'sequence') {
+      const durs = await Promise.all(videoPaths.map(probeDuration));
+      slot = Math.max(2, Math.round(Math.max(...durs, 0) * 100) / 100) || 5;
+    }
+
+    // Inputs: videos first (0..n-1), then any label PNGs. Sequence caps each
+    // video to one slot with -t so cells stay aligned.
+    const inputs = [];
+    let nInputs = 0;
+    for (const v of videoPaths) {
+      if (mode === 'sequence') inputs.push('-t', String(slot));
+      inputs.push('-i', v); nInputs++;
+    }
+    const labelIdx = [];
+    for (let i = 0; i < n; i++) {
+      if (labelPaths[i]) { labelIdx[i] = nInputs; inputs.push('-i', labelPaths[i]); nInputs++; }
+      else labelIdx[i] = -1;
+    }
+
+    const fit = `scale=${cellW}:${cellH}:force_original_aspect_ratio=decrease,pad=${cellW}:${cellH}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+    // Per-cell: fit into the cell (+ sequence timing), then overlay its label.
+    let fc = '';
+    for (let i = 0; i < n; i++) {
+      if (mode === 'sequence') {
+        const start = (i * slot).toFixed(3);
+        const stop = ((n - 1 - i) * slot).toFixed(3);
+        fc += `[${i}:v]${fit},tpad=stop_mode=clone:stop_duration=${slot},trim=0:${slot},setpts=PTS-STARTPTS,tpad=start_duration=${start}:start_mode=clone:stop_duration=${stop}:stop_mode=clone[s${i}];`;
+      } else {
+        fc += `[${i}:v]${fit}[s${i}];`;
+      }
+      fc += labelIdx[i] >= 0 ? `[s${i}][${labelIdx[i]}:v]overlay=12:12[c${i}];` : `[s${i}]null[c${i}];`;
+    }
+    // Black fillers for any empty cells in the grid.
+    const total = cols * rows;
+    for (let i = n; i < total; i++) fc += `color=c=#101012:s=${cellW}x${cellH}:r=24[c${i}];`;
+    // Build rows, then stack rows. A single-column (portrait) layout needs no
+    // hstack — each cell is its own row.
+    const rowLabels = [];
+    for (let r = 0; r < rows; r++) {
+      if (cols === 1) { rowLabels.push(`c${r}`); continue; }
+      const cells = [];
+      for (let c = 0; c < cols; c++) cells.push(`[c${r * cols + c}]`);
+      fc += `${cells.join('')}hstack=inputs=${cols}[row${r}];`;
+      rowLabels.push(`row${r}`);
+    }
+    let outLabel = rowLabels[0];
+    if (rows > 1) { fc += `${rowLabels.map((l) => `[${l}]`).join('')}vstack=inputs=${rows}[out];`; outLabel = 'out'; }
+
+    // Sequence mode: lay each clip's audio into its own time slot so you hear
+    // the active model during its turn. Clips without an audio track are simply
+    // skipped from the mix.
+    const audioArgs = [];
+    if (mode === 'sequence') {
+      const hasAudio = await Promise.all(videoPaths.map(probeHasAudio));
+      const withAudio = [];
+      for (let i = 0; i < n; i++) {
+        if (!hasAudio[i]) continue;
+        fc += `[${i}:a]atrim=0:${slot},asetpts=PTS-STARTPTS,adelay=${Math.round(i * slot * 1000)}:all=1,apad=whole_dur=${(n * slot).toFixed(3)}[a${i}];`;
+        withAudio.push(i);
+      }
+      if (withAudio.length === 1) {
+        fc += `[a${withAudio[0]}]anull[aout];`;
+        audioArgs.push('-map', '[aout]', '-c:a', 'aac');
+      } else if (withAudio.length > 1) {
+        fc += `${withAudio.map((i) => `[a${i}]`).join('')}amix=inputs=${withAudio.length}:normalize=0:duration=longest[aout];`;
+        audioArgs.push('-map', '[aout]', '-c:a', 'aac');
+      } else {
+        audioArgs.push('-an');
+      }
+    } else {
+      audioArgs.push('-an');
+    }
+
+    const outPath = path.join(JOBS_DIR, `${jobId}.mp4`);
+    await runFfmpeg(['-y', ...inputs, '-filter_complex', fc, '-map', `[${outLabel}]`, ...audioArgs, '-movflags', '+faststart', '-pix_fmt', 'yuv420p', outPath]);
+    return { resultUrl: `/api/generated/${jobId}.mp4` };
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// ── Agent: workflow planner ──
+// A lightweight planner (not a full tool-calling loop): given the user's idea,
+// the LLM returns a JSON media-workflow plan that the frontend then builds and
+// runs node-by-node on the canvas (with a per-step cost confirm). Tools are the
+// canvas node types — image / video / music generation — chained by `from`.
+const AGENT_PLAN_MODEL = 'anthropic/claude-sonnet-4.6';
+// Text models the agent planner may use (mirror TEXT_MODELS in nodes.tsx).
+const AGENT_TEXT_MODELS = new Set([
+  'anthropic/claude-haiku-4.5', 'anthropic/claude-sonnet-4.6', 'anthropic/claude-opus-4.7',
+  'anthropic/claude-opus-4.8', 'openai/gpt-5.5', 'google/gemini-3.1-pro',
+  'google/gemini-2.5-flash', 'deepseek/deepseek-v4-pro',
+]);
+// Mirror the frontend catalogs (src/canvas/nodes.tsx) so the planner only
+// picks model ids the gateway actually serves.
+const IMAGE_MODEL_IDS = 'google/nano-banana, google/nano-banana-pro, openai/gpt-image-1, openai/gpt-image-2, xai/grok-imagine-image, zai/cogview-4';
+const VIDEO_MODEL_IDS = 'xai/grok-imagine-video, bytedance/seedance-1.5-pro, azure/sora-2, bytedance/seedance-2.0-fast, bytedance/seedance-2.0';
+const MUSIC_MODEL_IDS = 'minimax/music-2.5+';
+const AGENT_SYSTEM = `You are a media-workflow planner inside a node-based AI studio. The user describes something they want to create (usually a short video). You design a small workflow of generation steps that the app will build visually on an infinite canvas and run one by one.
+
+Available step types (these are the canvas node types / tools):
+- "imagegen": generate an image from a text prompt (or from a previous image when "from" is set → image edit).
+- "videogen": generate a video. With "from" set to an image step, it animates that image (image→video); without "from", it's text→video.
+- "musicgen": generate a background music/audio clip from a text prompt.
+
+Available model ids (pick the most fitting; omit to use a sensible default):
+- image: ${IMAGE_MODEL_IDS}
+- video: ${VIDEO_MODEL_IDS}
+- music: ${MUSIC_MODEL_IDS}
+
+Chaining: each step has a unique short "id" (s1, s2, …). Set "from" to a prior step's id to feed that step's OUTPUT as the input of this step (e.g. imagegen → videogen animates the image). A common pattern: s1 imagegen (establish the look) → s2 videogen from s1 (animate it) → optionally s3 musicgen for a soundtrack.
+
+Rules:
+- Keep it to 2–4 steps. Prefer one clear chain.
+- Write rich, specific prompts (lighting, motion, style, mood) — they drive real generations.
+- For video/music steps include "durationS" (3–10).
+- Respond with ONLY a JSON object, no markdown fences, of the shape:
+{"message":"<one or two friendly sentences explaining the plan>","steps":[{"id":"s1","type":"imagegen","title":"<short label>","prompt":"<detailed prompt>","model":"<id or omit>","from":null,"durationS":null}]}`;
+
+function extractJsonObject(text) {
+  let t = (text || '').trim();
+  // strip ```json … ``` fences if present
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  try { return JSON.parse(t); } catch { /* fall through to brace scan */ }
+  const start = t.indexOf('{');
+  const end = t.lastIndexOf('}');
+  if (start >= 0 && end > start) return JSON.parse(t.slice(start, end + 1));
+  throw new Error('no JSON in model output');
+}
+
+async function planWorkflow(prompt, history, model) {
+  const { privateKey } = getWallet();
+  const client = new LLMClient({ privateKey, apiUrl });
+  const planModel = typeof model === 'string' && AGENT_TEXT_MODELS.has(model) ? model : AGENT_PLAN_MODEL;
+  const messages = [{ role: 'system', content: AGENT_SYSTEM }];
+  for (const h of (Array.isArray(history) ? history : []).slice(-6)) {
+    if (h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string') {
+      messages.push({ role: h.role, content: h.content });
+    }
+  }
+  messages.push({ role: 'user', content: String(prompt) });
+  const resp = await client.chatCompletion(planModel, messages, { maxTokens: 1400, temperature: 0.5 });
+  const text = resp.choices?.[0]?.message?.content || '';
+  const plan = extractJsonObject(text);
+  // Sanitize steps.
+  const okTypes = new Set(['imagegen', 'videogen', 'musicgen']);
+  const steps = (Array.isArray(plan.steps) ? plan.steps : [])
+    .filter((s) => s && okTypes.has(s.type) && typeof s.prompt === 'string' && s.prompt.trim())
+    .slice(0, 5)
+    .map((s, i) => ({
+      id: typeof s.id === 'string' && s.id ? s.id : `s${i + 1}`,
+      type: s.type,
+      title: typeof s.title === 'string' ? s.title.slice(0, 60) : '',
+      prompt: s.prompt.trim(),
+      model: typeof s.model === 'string' ? s.model : undefined,
+      from: typeof s.from === 'string' ? s.from : null,
+      durationS: Number.isFinite(s.durationS) ? Math.max(3, Math.min(10, s.durationS)) : undefined,
+    }));
+  // Drop dangling "from" references.
+  const ids = new Set(steps.map((s) => s.id));
+  for (const s of steps) if (s.from && !ids.has(s.from)) s.from = null;
+  return { message: typeof plan.message === 'string' ? plan.message : 'Here is a workflow for that.', steps };
+}
+
 // ── HTTP routing ───────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -498,6 +753,38 @@ const server = http.createServer(async (req, res) => {
         const ms = Date.now() - t0;
         console.warn(`[generate] ${body.kind} ${body.model || 'default'} FAIL ${ms}ms: ${err.message || err}`);
         return json(req, res, { ok: false, error: err.message || String(err) }, 502);
+      }
+    }
+
+    if (p === '/api/agent/plan' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      if (!body.prompt || !String(body.prompt).trim()) return json(req, res, { ok: false, error: 'prompt required' }, 400);
+      try {
+        const plan = await planWorkflow(body.prompt, body.history, body.model);
+        return json(req, res, { ok: true, ...plan });
+      } catch (err) {
+        console.warn(`[agent] plan FAIL: ${err.message || err}`);
+        return json(req, res, { ok: false, error: err.message || String(err) }, 502);
+      }
+    }
+
+    if (p === '/api/comparison/stitch' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      const items = Array.isArray(body.items) ? body.items : [];
+      const mode = body.mode === 'sequence' ? 'sequence' : 'grid';
+      const orientation = body.orientation === 'portrait' ? 'portrait' : 'landscape';
+      const t0 = Date.now();
+      try {
+        const out = await stitchComparison(items, mode, orientation);
+        console.log(`[comparison] stitched ${items.length} videos (${mode}/${orientation}) in ${Date.now() - t0}ms`);
+        return json(req, res, { ok: true, ...out });
+      } catch (err) {
+        console.warn(`[comparison] stitch FAIL: ${err.message || err}`);
+        return json(req, res, { ok: false, error: err.message || String(err) }, 500);
       }
     }
 

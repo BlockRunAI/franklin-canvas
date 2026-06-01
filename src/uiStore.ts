@@ -10,6 +10,9 @@ interface UiState {
   // Collections (收藏夹) panel — saved canvas results, opened from the sidebar.
   collectionsOpen: boolean;
   setCollectionsOpen: (open: boolean) => void;
+  // Agent chat panel — opened from the cute icon next to the prompt bar.
+  agentOpen: boolean;
+  setAgentOpen: (open: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -17,4 +20,6 @@ export const useUiStore = create<UiState>((set) => ({
   setPromptLibOpen: (promptLibOpen) => set({ promptLibOpen }),
   collectionsOpen: false,
   setCollectionsOpen: (collectionsOpen) => set({ collectionsOpen }),
+  agentOpen: false,
+  setAgentOpen: (agentOpen) => set({ agentOpen }),
 }));

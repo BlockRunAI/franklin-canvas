@@ -17,7 +17,11 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Sparkles } from 'lucide-react';
-import { NODE_TYPES, NODE_CATALOG, CATEGORY_TITLES, IMAGE_MODELS, VIDEO_MODELS, type GenNodeData, type NodeStatus, type NodeCatalogEntry } from '../canvas/nodes';
+import { NODE_TYPES, NODE_CATALOG, CATEGORY_TITLES, IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, type GenNodeData, type NodeStatus, type NodeCatalogEntry } from '../canvas/nodes';
+import AgentPanel from '../canvas/AgentPanel';
+import AgentMascot from '../components/AgentMascot';
+import { useAgentPrefs } from '../canvas/agentPrefsStore';
+import { type PlanStep } from '../api/franklin';
 import { EDGE_TYPES } from '../canvas/edges';
 import PromptBar from '../canvas/PromptBar';
 import PromptLibrary from '../canvas/PromptLibrary';
@@ -163,6 +167,10 @@ function CanvasInner() {
   const setPromptLibOpen = useUiStore((s) => s.setPromptLibOpen);
   const collectionsOpen = useUiStore((s) => s.collectionsOpen);
   const setCollectionsOpen = useUiStore((s) => s.setCollectionsOpen);
+  const agentOpen = useUiStore((s) => s.agentOpen);
+  const setAgentOpen = useUiStore((s) => s.setAgentOpen);
+  const agentImageModel = useAgentPrefs((s) => s.imageModel);
+  const agentVideoModel = useAgentPrefs((s) => s.videoModel);
   const theme = useThemeStore((s) => s.theme);
   const showMinimap = usePrefsStore((s) => s.showMinimap);
   const showDots = usePrefsStore((s) => s.showDots);
@@ -171,7 +179,7 @@ function CanvasInner() {
   const minimapMask = theme === 'dark' ? 'rgba(7,7,10,0.85)' : 'rgba(255,255,255,0.7)';
   const connectStartFrom = useRef<string | null>(null);
   const idCounter = useRef(100);
-  const { screenToFlowPosition, getNode } = useReactFlow();
+  const { screenToFlowPosition, getNode, fitView } = useReactFlow();
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge({ ...params, type: 'flow' }, eds)),
@@ -412,6 +420,44 @@ function CanvasInner() {
     setCollectionsOpen(false);
   };
 
+  // ── Agent workflow execution ──
+  // The agent panel hands us a plan; we materialize each step as a real node on
+  // the canvas (positioned left-to-right, wired to its `from` source) so the
+  // workflow is visible as it builds, then run the generation per step.
+  const agentCreateStep = useCallback((step: PlanStep, fromNodeId: string | null, index: number): string => {
+    const id = `n${idCounter.current++}`;
+    // Use the user's configured default model for each step type so the choice
+    // in Settings is what actually runs (the planner's suggestion is ignored).
+    const model = step.type === 'imagegen' ? agentImageModel
+                : step.type === 'videogen' ? agentVideoModel
+                : MUSIC_MODELS[0].id;
+    const data: Record<string, unknown> = {
+      title: step.title || step.type,
+      model,
+      prompt: step.prompt,
+      priceUsd: 0,
+      status: 'idle' as NodeStatus,
+    };
+    if (step.type === 'videogen') { data.durationS = step.durationS ?? 5; data.ratio = '16:9'; data.resolution = '720p'; data.audio = true; }
+    if (step.type === 'musicgen') data.durationS = step.durationS ?? 8;
+    const newNode: Node = { id, type: step.type, position: { x: 220 + index * 360, y: 160 }, data, selected: true };
+    setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode]);
+    if (fromNodeId) {
+      setEdges((eds) => addEdge({ id: `e-${fromNodeId}-${id}`, source: fromNodeId, target: id, sourceHandle: `${fromNodeId}-out`, targetHandle: `${id}-in`, type: 'flow' }, eds));
+    }
+    // Frame the freshly-built workflow so it's visible as the agent works.
+    // Pad extra on the right so nodes don't hide under the agent panel.
+    setTimeout(() => fitView({ padding: 0.35, duration: 400, maxZoom: 1 }), 90);
+    return id;
+  }, [setNodes, setEdges, fitView, agentImageModel, agentVideoModel]);
+
+  const agentRunStep = useCallback(async (nodeId: string, step: PlanStep, prevResultUrl?: string) => {
+    // Image edits / image→video use the previous step's output as the reference.
+    const ref = step.from ? prevResultUrl : undefined;
+    return simulateGen(nodeId, step.type, step.prompt, ref);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Normalize a reference image into a downscaled JPEG data: URI for the
   // gateway. References arrive as data: URIs (uploads), relative URLs
   // (/api/generated/… for generated images), or http(s) URLs. The gateway
@@ -452,7 +498,7 @@ function CanvasInner() {
   const simulateGen = async (id: string, mode: 'imagegen' | 'videogen' | 'musicgen', prompt: string, referenceUrlOverride?: string) => {
     setNodeStatus(id, 'running', { progress: 0, resultUrl: undefined, errorMessage: undefined });
 
-    const node = nodes.find((n) => n.id === id);
+    const node = getNode(id) ?? nodes.find((n) => n.id === id);
     const d = (node?.data ?? {}) as GenNodeData & {
       mode?: 'standard' | 'pro';
       ratio?: 'adaptive' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '21:9' | '9:21';
@@ -509,11 +555,13 @@ function CanvasInner() {
         try { finalUrl = await whiteBgToTransparent(finalUrl); } catch { /* keep original */ }
       }
       setNodeStatus(id, 'done', { resultUrl: finalUrl, progress: 1, createdAt: Date.now() });
+      return { ok: true as const, resultUrl: finalUrl };
     } else {
       setNodeStatus(id, 'error', {
         progress: 0,
         errorMessage: result.error,
       });
+      return { ok: false as const, error: result.error };
     }
   };
 
@@ -783,6 +831,19 @@ function CanvasInner() {
           <Sparkles size={15} strokeWidth={1.75} aria-hidden />
           <span>Prompts</span>
         </button>
+        {/* Media agent — a canvas-level entry (above any single prompt node):
+            describe an idea and watch it build a workflow on the canvas. */}
+        <button
+          type="button"
+          className={`canvas-add-btn canvas-agent-btn ${agentOpen ? 'is-active' : ''}`}
+          onClick={() => setAgentOpen(!agentOpen)}
+          title="Media agent — describe an idea, watch it build on the canvas"
+          aria-label="Open the media agent"
+          aria-pressed={agentOpen}
+        >
+          <AgentMascot size={18} />
+          <span>Agent</span>
+        </button>
       </div>
 
       <CanvasContext.Provider value={{ openConnectMenu, runImageEdit, runImageSplit, runAnnotate }}>
@@ -874,6 +935,12 @@ function CanvasInner() {
       </CanvasContext.Provider>
       <PromptLibrary open={promptLibOpen} onClose={() => setPromptLibOpen(false)} onUse={usePromptFromLibrary} />
       <CollectionsPanel open={collectionsOpen} onClose={() => setCollectionsOpen(false)} onUse={importFavorite} />
+      <AgentPanel
+        open={agentOpen}
+        onClose={() => setAgentOpen(false)}
+        createStep={agentCreateStep}
+        runStep={agentRunStep}
+      />
       <AnnotateModal
         open={!!annotateSrc}
         imageUrl={annotateSrc?.url ?? null}

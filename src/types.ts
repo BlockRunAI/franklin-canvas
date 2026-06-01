@@ -1,4 +1,4 @@
-export type Route = 'canvas' | 'wallet' | 'projects';
+export type Route = 'canvas' | 'wallet' | 'projects' | 'comparison';
 
 export interface Message {
   id: string;

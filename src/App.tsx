@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import CanvasView from './views/CanvasView';
 import ProjectsView from './views/ProjectsView';
+import ComparisonView from './views/ComparisonView';
 import SettingsDialog from './canvas/SettingsDialog';
 import { useThemeStore } from './canvas/themeStore';
 import type { Route } from './types';
@@ -12,6 +13,7 @@ const TITLES: Record<Route, string> = {
   canvas: 'Canvas',
   projects: 'Projects',
   wallet: 'Wallet',
+  comparison: 'Comparison',
 };
 
 export default function App() {
@@ -43,6 +45,7 @@ export default function App() {
       <main className="main" aria-label={TITLES[route]}>
         {route === 'canvas' && <CanvasView />}
         {route === 'projects' && <ProjectsView onOpenCanvas={() => setRoute('canvas')} />}
+        {route === 'comparison' && <ComparisonView />}
       </main>
       <SettingsDialog
         open={settingsOpen}
