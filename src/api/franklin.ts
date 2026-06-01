@@ -173,6 +173,7 @@ export interface GenerateRequest {
   aspectRatio?: 'adaptive' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '21:9' | '9:21';
   resolution?: '360p' | '480p' | '540p' | '720p' | '1080p' | '1K' | '2K' | '4K';
   generateAudio?: boolean;
+  quality?: 'standard' | 'hd';
   seed?: number;
   watermark?: boolean;
   returnLastFrame?: boolean;
@@ -279,6 +280,22 @@ export async function agentChat(model: string | undefined, messages: ChatTurn[])
   }
 }
 
+// Summarize early conversation turns (auto-compact). Returns null on failure.
+export async function summarizeTurns(turns: ChatTurn[]): Promise<string | null> {
+  try {
+    const r = await fetch(`${base}/agent/summarize`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: turns }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false || !data.summary) return null;
+    return data.summary as string;
+  } catch {
+    return null;
+  }
+}
+
 // Execute one BACKEND tool (web / memory / MoA / utility / filesystem / bash).
 export async function agentTool(name: string, input: Record<string, unknown>): Promise<{ output: string; isError?: boolean }> {
   try {
@@ -335,6 +352,22 @@ export type StitchMode = 'grid' | 'sequence';
 export type StitchOrientation = 'landscape' | 'portrait';
 // Watermark position as a fraction of free space per cell: {0,0}=top-left, {1,1}=bottom-right.
 export interface LabelPos { x: number; y: number }
+
+// Concatenate clips end-to-end into one continuous film (storyboard → film).
+export async function concatVideos(items: { url: string }[]): Promise<GenerateResult | GenerateError> {
+  try {
+    const r = await fetch(`${base}/concat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false) return { ok: false, error: data?.error || `concat failed (${r.status})` };
+    return { ok: true, resultUrl: data.resultUrl as string };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message || 'network error' };
+  }
+}
 
 // Composite N comparison videos into one MP4 server-side (ffmpeg).
 //   mode: grid (all play at once) | sequence (one at a time, others frozen)

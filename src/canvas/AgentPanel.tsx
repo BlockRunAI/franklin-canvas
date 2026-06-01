@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import AgentMascot from '../components/AgentMascot';
 import ModelDropdown from '../components/ModelDropdown';
-import { agentChat, type ChatTurn, type ToolCall } from '../api/franklin';
+import { agentChat, summarizeTurns, type ChatTurn, type ToolCall } from '../api/franklin';
 import { TEXT_MODELS } from './nodes';
 import { useAgentPrefs, type AgentMode } from './agentPrefsStore';
 import { useAgentSessions, type TraceItem, type TraceStatus } from './agentSessionsStore';
@@ -157,12 +157,33 @@ export default function AgentPanel({ open, onClose, api }: Props) {
     void runLoop();
   };
 
+  // Auto-compact: when the running conversation grows past a budget, summarize
+  // the early turns and replace them with one summary message — keeping the most
+  // recent turns verbatim. The cut never lands on an orphan `tool` message, so
+  // OpenAI tool-call threading stays valid. Only turnsRef (what the model sees)
+  // is compacted; the visible trace stays complete.
+  const COMPACT_CHARS = 24000; // ~6k tokens of content before we compact
+  const KEEP_RECENT = 8;
+  const turnsSize = (t: ChatTurn[]) => t.reduce((n, m) => n + (m.content?.length || 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0), 0);
+  const compactIfNeeded = async () => {
+    const turns = turnsRef.current;
+    if (turnsSize(turns) < COMPACT_CHARS || turns.length <= KEEP_RECENT + 2) return;
+    let cut = turns.length - KEEP_RECENT;
+    while (cut > 0 && turns[cut]?.role === 'tool') cut--; // don't start the kept tail on an orphan tool result
+    if (cut <= 1) return;
+    const summary = await summarizeTurns(turns.slice(0, cut));
+    if (!summary) return;
+    turnsRef.current = [{ role: 'user', content: `[Earlier conversation summary — context compacted to save tokens]\n${summary}` }, ...turns.slice(cut)];
+    push({ kind: 'agent', text: '🧷 Compacted earlier steps to keep the context lean.' });
+  };
+
   const runLoop = async () => {
     setRunning(true);
     stopRef.current = false;
     try {
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         if (stopRef.current) break;
+        await compactIfNeeded();
         const res = await agentChat(model, turnsRef.current);
         if (!res.ok) { push({ kind: 'agent', text: `Sorry — ${res.error}` }); break; }
         const msg = res.message;

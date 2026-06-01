@@ -18,6 +18,9 @@ export interface CanvasNodeInfo {
   prompt: string;
   hasResult: boolean;
   resultKind?: 'image' | 'video' | 'music';
+  status?: string; // idle | running | done | error
+  from?: string[]; // ids of nodes feeding INTO this one (incoming edges)
+  to?: string[];   // ids of nodes this one feeds (outgoing edges)
 }
 
 export interface CanvasToolResult {
@@ -38,8 +41,12 @@ export interface CanvasAgentApi {
   editImage(args: { nodeId: string; prompt: string; model?: string }): Promise<CanvasToolResult>;
   upscaleImage(nodeId: string): Promise<CanvasToolResult>;
   stitchVideos(nodeIds: string[], mode: 'grid' | 'sequence', orientation: 'landscape' | 'portrait'): Promise<CanvasToolResult>;
+  assembleFilm(nodeIds: string[], title?: string): Promise<CanvasToolResult>;
   describe(nodeId: string, question?: string): Promise<CanvasToolResult>;
   listCanvas(): CanvasNodeInfo[];
+  deleteNodes(nodeIds: string[]): Promise<CanvasToolResult>;
+  disconnectNodes(a: string, b: string): Promise<CanvasToolResult>;
+  regenerateNode(nodeId: string): Promise<CanvasToolResult>;
 }
 
 export interface ToolDeps {
@@ -52,13 +59,14 @@ export interface ToolDeps {
 // without prompting (cheap, no side effects).
 export const CONFIRM_TOOLS = new Set([
   'generate_image', 'generate_video', 'generate_music', 'edit_image', 'upscale_image',
-  'write_file', 'edit_file', 'bash', 'webhook_post',
+  'regenerate_node', 'delete_node', 'write_file', 'edit_file', 'bash', 'webhook_post',
 ]);
 
 // Tools the canvas executes in-browser (everything else → backend).
 const CANVAS_TOOLS = new Set([
   'generate_image', 'generate_video', 'generate_music', 'edit_image',
-  'upscale_image', 'stitch_videos', 'describe_media', 'list_canvas', 'ask_user',
+  'upscale_image', 'stitch_videos', 'assemble_film', 'describe_media', 'list_canvas',
+  'delete_node', 'disconnect_nodes', 'regenerate_node', 'ask_user',
 ]);
 
 // Rough USD estimate for the confirm gate (0 when not a paid media op).
@@ -90,8 +98,12 @@ export function toolLabel(name: string, input: Record<string, unknown>): string 
     case 'edit_image': return `Edit image · ${short}`;
     case 'upscale_image': return `Upscale image`;
     case 'stitch_videos': return `Stitch ${(input.node_ids as string[])?.length ?? 0} videos`;
+    case 'assemble_film': return `Assemble film · ${(input.node_ids as string[])?.length ?? 0} clips`;
     case 'describe_media': return `Look at media`;
     case 'list_canvas': return `Read canvas`;
+    case 'delete_node': return `Delete ${(input.node_ids as string[])?.length ?? 0} node(s)`;
+    case 'disconnect_nodes': return `Disconnect ${input.node_a as string} ↔ ${input.node_b as string}`;
+    case 'regenerate_node': return `Regenerate node ${(input.node_id as string) || ''}`;
     case 'ask_user': return `Ask: ${short}`;
     case 'web_search': return `Web search · ${short}`;
     case 'web_fetch': return `Fetch ${short}`;
@@ -156,6 +168,12 @@ async function executeCanvasTool(name: string, input: Record<string, unknown>, {
       if (!r.ok) return `Stitch failed: ${r.error}`;
       return `Stitched ${ids.length} videos into node ${r.nodeId} (${mode}/${orientation}). result_url=${r.resultUrl}`;
     }
+    case 'assemble_film': {
+      const ids = (input.node_ids as string[]) || [];
+      const r = await canvas.assembleFilm(ids, str('title'));
+      if (!r.ok) return `Assemble failed: ${r.error}`;
+      return `Assembled ${ids.length} clips into one film (node ${r.nodeId}) and laid them on a Timeline. result_url=${r.resultUrl}`;
+    }
     case 'describe_media': {
       const r = await canvas.describe(str('node_id')!, str('question'));
       return r.ok ? (r.text || '(no description)') : `Describe failed: ${r.error}`;
@@ -163,7 +181,24 @@ async function executeCanvasTool(name: string, input: Record<string, unknown>, {
     case 'list_canvas': {
       const nodes = canvas.listCanvas();
       if (!nodes.length) return 'The canvas is empty.';
-      return nodes.map((n) => `- ${n.nodeId} [${n.type}] "${n.title}"${n.hasResult ? ` (has ${n.resultKind} result)` : ' (no result yet)'} — ${n.prompt.slice(0, 60)}`).join('\n');
+      return nodes.map((n) => {
+        const conn = n.from?.length ? ` ← from ${n.from.join(',')}` : '';
+        const out = n.to?.length ? ` → to ${n.to.join(',')}` : '';
+        return `- ${n.nodeId} [${n.type}] status=${n.status || 'idle'}${n.hasResult ? ` (has ${n.resultKind} result)` : ''}${conn}${out} "${n.title}" — ${n.prompt.slice(0, 60)}`;
+      }).join('\n');
+    }
+    case 'delete_node': {
+      const ids = (input.node_ids as string[]) || [];
+      const r = await canvas.deleteNodes(ids);
+      return r.ok ? (r.text || `Deleted ${ids.length} node(s).`) : `Delete failed: ${r.error}`;
+    }
+    case 'disconnect_nodes': {
+      const r = await canvas.disconnectNodes(str('node_a')!, str('node_b')!);
+      return r.ok ? (r.text || 'Disconnected.') : `Disconnect failed: ${r.error}`;
+    }
+    case 'regenerate_node': {
+      const r = await canvas.regenerateNode(str('node_id')!);
+      return r.ok ? `Regenerated node ${str('node_id')}. result_url=${r.resultUrl}` : `Regenerate failed: ${r.error}`;
     }
     case 'ask_user': {
       const answer = await askUser(str('question')!, input.options as string[] | undefined);

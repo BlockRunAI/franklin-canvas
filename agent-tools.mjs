@@ -142,6 +142,21 @@ export const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'assemble_film',
+      description: 'Join finished video clips END-TO-END into ONE continuous, full-frame short film, in the given order (clip 1 plays, then clip 2, …). This is the way to turn storyboard shots into a final film. Also drops the clips onto a Timeline node so they can be re-ordered/edited. (For a SIDE-BY-SIDE model comparison instead, use stitch_videos.)',
+      parameters: {
+        type: 'object',
+        properties: {
+          node_ids: { type: 'array', items: { type: 'string' }, description: 'Video node ids to join, in play order.' },
+          title: { type: 'string', description: 'Optional title for the film node.' },
+        },
+        required: ['node_ids'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'describe_media',
       description: 'Look at an existing image/video node on the canvas and return a description (use it to write a follow-up prompt, check a result, or caption media). For video, the first frame is analyzed.',
       parameters: {
@@ -151,6 +166,45 @@ export const AGENT_TOOLS = [
           question: { type: 'string', description: 'Optional specific question, else a general description is returned.' },
         },
         required: ['node_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'regenerate_node',
+      description: 'Re-run an EXISTING generation node in place using its own prompt/model/reference (an invalid model is auto-corrected). Use this to RETRY a node that failed — do NOT create a new node or animate a different node for a retry.',
+      parameters: {
+        type: 'object',
+        properties: { node_id: { type: 'string', description: 'The node to re-run.' } },
+        required: ['node_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'disconnect_nodes',
+      description: 'Remove the connecting edge(s) between two nodes WITHOUT deleting the nodes themselves. Use to fix an incorrect link between blocks. Direction-agnostic.',
+      parameters: {
+        type: 'object',
+        properties: {
+          node_a: { type: 'string', description: 'One node id.' },
+          node_b: { type: 'string', description: 'The other node id.' },
+        },
+        required: ['node_a', 'node_b'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_node',
+      description: 'Delete one or more nodes from the canvas (and their connecting edges) — e.g. to clean up failed generations, remove rejected drafts, or tidy up. Irreversible, so only delete what is clearly unwanted.',
+      parameters: {
+        type: 'object',
+        properties: { node_ids: { type: 'array', items: { type: 'string' }, description: 'Node ids to delete.' } },
+        required: ['node_ids'],
       },
     },
   },
@@ -398,7 +452,7 @@ export const AGENT_TOOLS = [
 // Names the FRONTEND owns (executed in the browser). Everything else → backend.
 export const CANVAS_TOOL_NAMES = new Set([
   'generate_image', 'generate_video', 'generate_music', 'edit_image',
-  'upscale_image', 'stitch_videos', 'describe_media', 'list_canvas', 'ask_user',
+  'upscale_image', 'stitch_videos', 'assemble_film', 'describe_media', 'list_canvas', 'delete_node', 'disconnect_nodes', 'regenerate_node', 'ask_user',
 ]);
 
 export const AGENT_CHAT_SYSTEM = `You are the Media Agent inside a node-based AI media studio (an infinite canvas). The user describes media they want — usually images, short videos, or music — and you BUILD it by calling tools. Each generation appears as a node on the canvas; chaining tools (image → animate → stitch) connects the nodes visually.
@@ -408,9 +462,10 @@ You are a REAL tool-using agent: call a tool, look at its result, then decide th
 How to work:
 - For "make a video of X": usually generate_image (establish the look) → generate_video with from_node_id set to that image (animate it) → optionally generate_music. But adapt to the request.
 - Tools that return a node_id let you chain: pass that id as reference_node_id / from_node_id / node_id to the next tool.
-- Use list_canvas to see what already exists before creating duplicates; reuse existing nodes when sensible.
+- Use list_canvas to see what exists. Each line shows the node's type, status, whether it has a result, AND its connections: "← from X" (X feeds this node) and "→ to Y" (this node feeds Y). Use these to understand the graph before acting. Before animating an image, check if it already has a video "→ to" it — if so, don't create a duplicate; regenerate that existing video instead. Use delete_node to clean up failed/rejected nodes when asked to tidy up.
+- To RETRY a node that failed, call regenerate_node with that node's id (find it via list_canvas — it's the one with status=error). Re-run the SAME node; do not create a new node or animate a different node just to retry. Match node ids to the right type: image nodes are type "imagegen", videos "videogen", music "musicgen".
 - Use describe_media to actually look at a result (e.g. to verify it, caption it, or write a better follow-up prompt).
-- Use stitch_videos to combine multiple clips into one deliverable.
+- To turn a multi-shot storyboard into a finished film, generate each shot as its own video, then call assemble_film with those node_ids — it joins them end-to-end into one continuous clip (and lays them on a Timeline). Use stitch_videos ONLY for side-by-side model comparisons, not for storyboard films.
 - Web tools (web_search/exa) are for references, facts, and inspiration. Filesystem/bash tools operate on the user's machine — use them when the task involves local files, ffmpeg, or project work.
 - The app shows the user a cost confirmation before each paid/destructive tool runs and may auto-approve in auto mode — you don't need to ask permission for cost yourself, just call the tool.
 - Write rich, specific prompts (lighting, motion, style, mood) — they drive real paid generations.
@@ -579,22 +634,44 @@ function globToRegExp(glob) {
 }
 
 // ── describe_media (vision) ───────────────────────────────────────────────────
-// The frontend resolves a canvas node to an image URL (for video, a captured
-// frame) and posts it here. Relative /api/generated/ URLs are read off disk and
-// inlined as data URLs so the gateway always gets a usable image.
+// The frontend hands us a node's media URL. For local /api/generated/ files we
+// run ONE ffmpeg pass → a downscaled (≤1024px) JPEG: this grabs the first frame
+// of a video AND shrinks images, so the vision payload is small and fast (large
+// full-res frames were slow enough to hit the request timeout = "aborted").
+
+// Produce a small JPEG (first frame for video, scaled for image). Returns path.
+function toSmallJpeg(srcPath) {
+  return new Promise((resolve, reject) => {
+    const out = `${srcPath}.desc.jpg`;
+    const pp = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-i', srcPath, '-frames:v', '1',
+      '-vf', "scale='min(1024,iw)':-2", '-q:v', '4', out]);
+    pp.on('close', (code) => (code === 0 && fs.existsSync(out) ? resolve(out) : reject(new Error('image prep failed'))));
+    pp.on('error', reject);
+  });
+}
 
 export async function describeMedia({ imageUrl, question }, ctx) {
   let url = imageUrl;
+  let tmp = null;
   if (url && url.startsWith('/api/generated/')) {
     const fp = path.join(ctx.jobsDir, path.basename(url.split('?')[0]));
     if (fs.existsSync(fp)) {
-      const ext = path.extname(fp).slice(1).toLowerCase();
-      const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-      url = `data:${mime};base64,${fs.readFileSync(fp).toString('base64')}`;
+      try {
+        tmp = await toSmallJpeg(fp);
+        url = `data:image/jpeg;base64,${fs.readFileSync(tmp).toString('base64')}`;
+      } catch {
+        // Fallback: inline the raw image bytes (skip videos — can't inline those).
+        const ext = path.extname(fp).slice(1).toLowerCase();
+        if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+          const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+          url = `data:${mime};base64,${fs.readFileSync(fp).toString('base64')}`;
+        }
+      }
     }
   }
+  if (tmp) { try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ } }
   if (!url) throw new Error('no image to describe');
-  const br = new BlockrunClient({ privateKey: ctx.privateKey, apiUrl: ctx.apiUrl });
+  const br = new BlockrunClient({ privateKey: ctx.privateKey, apiUrl: ctx.apiUrl, timeout: 120000 });
   const resp = await br.post('/v1/chat/completions', {
     model: VISION_MODEL,
     max_tokens: 700,
@@ -624,4 +701,24 @@ export async function runAgentChat({ model, messages }, ctx) {
   const choice = resp?.choices?.[0];
   const message = choice?.message || { role: 'assistant', content: '' };
   return { message, finish_reason: choice?.finish_reason || 'stop' };
+}
+
+// Compress the earlier part of an agent conversation into a short running memory
+// (auto-compact). The frontend feeds the early turns here when history grows too
+// large, then replaces them with the returned summary to keep the context lean.
+export async function summarizeConversation(messages, ctx) {
+  const transcript = (Array.isArray(messages) ? messages : []).map((m) => {
+    if (m.role === 'assistant' && m.tool_calls?.length) {
+      const calls = m.tool_calls.map((c) => `${c.function?.name}(${clamp(String(c.function?.arguments || ''), 200)})`).join(', ');
+      return `ASSISTANT called: ${calls}${m.content ? `\nASSISTANT: ${m.content}` : ''}`;
+    }
+    if (m.role === 'tool') return `TOOL RESULT (${m.name}): ${clamp(String(m.content || ''), 500)}`;
+    return `${String(m.role).toUpperCase()}: ${m.content || ''}`;
+  }).join('\n');
+  const sys = `You compress the earlier part of an AI media-studio agent conversation into a brief running memory. PRESERVE: the user's overall goal; every asset created (node id + media kind + result_url + model); key creative decisions; and any unfinished tasks. Drop chit-chat. Output concise plain-text notes (<= 250 words).`;
+  const client = llm(ctx);
+  const resp = await client.chatCompletion('anthropic/claude-haiku-4.5',
+    [{ role: 'system', content: sys }, { role: 'user', content: clamp(transcript, 40000) }],
+    { maxTokens: 700, temperature: 0.2 });
+  return resp?.choices?.[0]?.message?.content || '';
 }

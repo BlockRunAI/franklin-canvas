@@ -1807,7 +1807,7 @@ button:active:not(:disabled) { transform: scale(0.97); }
 /* Match the other PromptBar icon buttons (paperclip / ref picker = 38×38)
    so the gear doesn't look like a tiny afterthought next to them. */
 .pb-settings-btn { width: 38px; height: 38px; }
-.pb-settings-btn svg { width: 20px; height: 20px; }
+.pb-settings-btn svg { width: 24px; height: 24px; }
 .pb-settings-btn.is-active { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-bg); }
 .pb-settings-pop {
   position: absolute; bottom: calc(100% + 10px); left: 0; z-index: 30;
@@ -2736,7 +2736,7 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 }
 .sidebar.is-collapsed .sidebar-brand-mark span,
 .sidebar.is-collapsed .nav-item span,
-.sidebar.is-collapsed .version { opacity: 0; }
+.sidebar.is-collapsed .version { opacity: 0; width: 0; overflow: hidden; }
 .nav-item, .sidebar-collapse, .sidebar-rail-item, .canvas-add-btn, .btn-drawer-toggle {
   transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.14s ease;
 }
@@ -2767,7 +2767,7 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
    expand icon) centered — otherwise there's no way to expand again. */
 .sidebar.is-collapsed .sidebar-brand { justify-content: center; }
 .sidebar.is-collapsed .sidebar-brand-mark { display: none; }
-.sidebar.is-collapsed .nav-item { justify-content: center; }
+.sidebar.is-collapsed .nav-item { justify-content: center; gap: 0; }
 .nav-item { border-radius: 10px; position: relative; }
 .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 3px; height: 16px; border-radius: 999px; background: var(--accent); }
 .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

@@ -10,12 +10,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useReactFlow, useStore } from '@xyflow/react';
 import {
-  Paperclip, ArrowUp, ImageIcon, Film, Music, X, Plus, Upload, AlertCircle, Settings2,
+  ArrowUp, ImageIcon, Film, Music, X, Plus, Upload, AlertCircle, Settings2,
   type LucideIcon,
 } from 'lucide-react';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS } from './nodes';
 import ModelDropdown from '../components/ModelDropdown';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
+import ImageSettingsPanel, { type ImageSettings, type ImageRatio, type ImageQuality } from './ImageSettingsPanel';
 import { getWallet } from '../api/franklin';
 import { useT } from '../i18n';
 
@@ -280,15 +281,6 @@ export default function PromptBar({ onSend }: Props) {
           onUploadClick={onAttachClick}
         />
         <input ref={fileRef} type="file" accept="image/*" onChange={onAttachFile} hidden />
-        <button
-          className="pb-icon-btn"
-          type="button"
-          aria-label="Upload reference from disk"
-          title="Upload reference from disk"
-          onClick={onAttachClick}
-        >
-          <Paperclip size={22} strokeWidth={2} aria-hidden />
-        </button>
         <div className="pb-flex" />
         {bound && selectedNode && (
           <span className="pb-bound-chip">
@@ -315,9 +307,37 @@ export default function PromptBar({ onSend }: Props) {
         </div>
         <div className="pb-divider" />
         <ModelDropdown models={meta.models} value={model} onChange={setModel} />
-        {/* Settings gear — Video only (aspect / resolution / duration /
-            audio). Image generation has no per-call knobs worth exposing;
-            music settings live in the music node's lyrics popover. */}
+        {/* Settings gear — Video (aspect / resolution / duration / audio) and
+            Image (aspect ratio / quality). Music settings live in the music
+            node's lyrics popover. */}
+        {mode === 'imagegen' && (
+          <div className="pb-settings-wrap">
+            <button
+              type="button"
+              className={`pb-icon-btn pb-settings-btn ${settingsOpen ? 'is-active' : ''}`}
+              onClick={() => setSettingsOpen((v) => !v)}
+              aria-label="Open image settings"
+              aria-expanded={settingsOpen}
+              title="Image settings"
+            >
+              <Settings2 size={20} strokeWidth={2.2} aria-hidden />
+            </button>
+            {settingsOpen && (() => {
+              const nd = selectedNode?.data as { ratio?: ImageRatio; quality?: ImageQuality } | undefined;
+              const value: ImageSettings = { ratio: nd?.ratio ?? '1:1', quality: nd?.quality ?? 'standard' };
+              return (
+                <div className="pb-settings-pop">
+                  <ImageSettingsPanel
+                    value={value}
+                    onChange={(next) => {
+                      if (selectedId) updateNodeData(selectedId, { ratio: next.ratio, quality: next.quality });
+                    }}
+                  />
+                </div>
+              );
+            })()}
+          </div>
+        )}
         {mode === 'videogen' && (
           <div className="pb-settings-wrap">
             <button

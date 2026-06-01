@@ -15,8 +15,8 @@ type SettingsSection = 'wallet' | 'models' | 'canvas' | 'about';
 
 interface NavItem { id: Route; labelKey: StringKey; Icon: typeof Workflow; }
 const ITEMS: NavItem[] = [
-  { id: 'canvas',     labelKey: 'sidebar_canvas',     Icon: Workflow },
   { id: 'projects',   labelKey: 'sidebar_projects',   Icon: LayoutGrid },
+  { id: 'canvas',     labelKey: 'sidebar_canvas',     Icon: Workflow },
   { id: 'comparison', labelKey: 'sidebar_comparison', Icon: Columns3 },
 ];
 

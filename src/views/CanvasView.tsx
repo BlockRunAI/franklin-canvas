@@ -30,7 +30,7 @@ import { type FavItem } from '../collectionsStore';
 import CanvasViewBar from '../canvas/CanvasViewBar';
 import { usePrefsStore } from '../canvas/prefsStore';
 import { CanvasContext, type ImageEditOp } from '../canvas/CanvasContext';
-import { generate, stitchComparison, describeMedia, type StitchItem } from '../api/franklin';
+import { generate, stitchComparison, concatVideos, describeMedia, type StitchItem } from '../api/franklin';
 import type { CanvasAgentApi } from '../canvas/agentTools';
 import { getOrCreateCurrent, saveProjectCanvas, renameProject } from '../projects';
 import { useUiStore } from '../uiStore';
@@ -179,7 +179,8 @@ function CanvasInner() {
   const minimapMask = theme === 'dark' ? 'rgba(7,7,10,0.85)' : 'rgba(255,255,255,0.7)';
   const connectStartFrom = useRef<string | null>(null);
   const idCounter = useRef(100);
-  const { screenToFlowPosition, getNode, getNodes, fitView } = useReactFlow();
+  const agentColIdx = useRef(0); // vertical position of the next standalone agent node
+  const { screenToFlowPosition, getNode, getNodes, getEdges, fitView } = useReactFlow();
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge({ ...params, type: 'flow' }, eds)),
@@ -461,7 +462,7 @@ function CanvasInner() {
     setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, status, ...extra } } : n)));
   };
 
-  const simulateGen = async (id: string, mode: 'imagegen' | 'videogen' | 'musicgen', prompt: string, referenceUrlOverride?: string) => {
+  const simulateGen = async (id: string, mode: 'imagegen' | 'videogen' | 'musicgen', prompt: string, referenceUrlOverride?: string, modelOverride?: string) => {
     setNodeStatus(id, 'running', { progress: 0, resultUrl: undefined, errorMessage: undefined });
 
     const node = getNode(id) ?? nodes.find((n) => n.id === id);
@@ -499,15 +500,17 @@ function CanvasInner() {
     const result = await generate({
       kind: kindMap[mode],
       prompt,
-      model: d.model,
+      model: modelOverride ?? d.model,
       durationS: mode === 'videogen' || mode === 'musicgen' ? (d.durationS ?? 8) : undefined,
       lyrics: mode === 'musicgen' && d.lyricsMode === 'custom' ? d.lyrics : undefined,
       instrumental: mode === 'musicgen' ? !d.lyrics && d.lyricsMode === 'adaptive' ? false : undefined : undefined,
       imageUrl,
-      // Video-only gateway params from the node's settings panel.
-      aspectRatio: mode === 'videogen' ? d.ratio : undefined,
+      // Gateway params from the node's settings panel. Aspect ratio applies to
+      // both image and video; quality is image-only; resolution/audio video-only.
+      aspectRatio: (mode === 'videogen' || mode === 'imagegen') ? d.ratio : undefined,
       resolution: mode === 'videogen' ? d.resolution : undefined,
       generateAudio: mode === 'videogen' ? d.audio : undefined,
+      quality: mode === 'imagegen' ? (d as { quality?: 'standard' | 'hd' }).quality : undefined,
     });
     cancelled = true;
     clearInterval(tick);
@@ -701,33 +704,24 @@ function CanvasInner() {
   // (create/chain/edit/upscale/stitch/describe/list nodes). Backend tools (web,
   // memory, filesystem, bash…) are dispatched separately in agentTools.ts.
 
-  // Grab a video's first frame as a JPEG data URL (for describe_media on videos).
-  const captureVideoFrame = (url: string): Promise<string> => new Promise((resolve, reject) => {
-    const v = document.createElement('video');
-    v.crossOrigin = 'anonymous'; v.muted = true; v.preload = 'metadata'; v.src = url;
-    v.onloadeddata = () => { try { v.currentTime = Math.min(0.1, (v.duration || 1) - 0.01); } catch { /* ignore */ } };
-    v.onseeked = () => {
-      const c = document.createElement('canvas');
-      c.width = v.videoWidth || 640; c.height = v.videoHeight || 360;
-      const ctx = c.getContext('2d');
-      if (!ctx) return reject(new Error('no 2d ctx'));
-      ctx.drawImage(v, 0, 0, c.width, c.height);
-      try { resolve(c.toDataURL('image/jpeg', 0.85)); } catch (e) { reject(e as Error); }
-    };
-    v.onerror = () => reject(new Error('video load failed'));
-  });
-
   // Position a new node to the right of its source, or cascade if standalone.
   const placeAgentNode = (fromNodeId?: string): { x: number; y: number } => {
+    // With a source (image→video, edit, upscale, stitch): place to its RIGHT.
     if (fromNodeId) {
       const s = getNode(fromNodeId);
       if (s) {
         const w = (s.measured?.width ?? s.width ?? 280);
-        return { x: s.position.x + w + 110, y: s.position.y };
+        return { x: s.position.x + w + 120, y: s.position.y };
       }
     }
-    const n = getNodes().length;
-    return { x: 220 + (n % 5) * 360, y: 160 + Math.floor(n / 5) * 340 };
+    // Standalone (parallel storyboard images): stack DOWN a left column so each
+    // video placed to an image's right lands in empty space, never overlapping
+    // the next image. A ref counter avoids stale getNodes().length collisions
+    // when several are created in quick succession.
+    const COL_X = 200, ROW_H = 340, TOP = 140;
+    const y = TOP + agentColIdx.current * ROW_H;
+    agentColIdx.current += 1;
+    return { x: COL_X, y };
   };
 
   const agentApi: CanvasAgentApi = {
@@ -739,8 +733,12 @@ function CanvasInner() {
         refUrl = rd?.resultUrl || rd?.imageUrl;
       }
       const id = `n${idCounter.current++}`;
-      const model = args.model
-        || (kind === 'imagegen' ? agentImageModel : kind === 'videogen' ? agentVideoModel : MUSIC_MODELS[0].id);
+      // Don't trust the agent's model id blindly — it sometimes picks a model
+      // from the wrong family (e.g. an image model for a video). Validate against
+      // the catalog for this kind; fall back to the user's configured default.
+      const catalog = kind === 'imagegen' ? IMAGE_MODELS : kind === 'videogen' ? VIDEO_MODELS : MUSIC_MODELS;
+      const fallback = kind === 'imagegen' ? agentImageModel : kind === 'videogen' ? agentVideoModel : MUSIC_MODELS[0].id;
+      const model = (args.model && catalog.some((m) => m.id === args.model)) ? args.model : fallback;
       const data: Record<string, unknown> = { title: kind, model, prompt: args.prompt, priceUsd: 0, status: 'idle' as NodeStatus, referenceUrl: refUrl };
       if (kind === 'videogen') { data.durationS = args.durationS ?? 5; data.ratio = args.aspectRatio || '16:9'; data.resolution = args.resolution || '720p'; data.audio = args.audio !== false; }
       if (kind === 'musicgen') { data.durationS = args.durationS ?? 8; if (args.lyrics) { data.lyrics = args.lyrics; data.lyricsMode = 'custom'; } if (args.instrumental != null) data.instrumental = args.instrumental; }
@@ -777,26 +775,83 @@ function CanvasInner() {
       setTimeout(() => fitView({ padding: 0.35, duration: 400, maxZoom: 1 }), 90);
       return { ok: true, nodeId: id, resultUrl: r.resultUrl };
     },
+    async assembleFilm(nodeIds, title) {
+      const items: { url: string }[] = [];
+      const clips: { id: string; url: string; kind: 'video'; label: string; durationS: number }[] = [];
+      for (const nid of nodeIds) {
+        const d = getNode(nid)?.data as { resultUrl?: string; model?: string; title?: string; durationS?: number } | undefined;
+        if (d?.resultUrl) {
+          items.push({ url: d.resultUrl });
+          clips.push({ id: `c-${nid}-${idCounter.current++}`, url: d.resultUrl, kind: 'video', label: d.title || d.model || nid, durationS: d.durationS ?? 5 });
+        }
+      }
+      if (items.length < 2) return { ok: false, error: 'need at least 2 finished clips to assemble a film' };
+      const r = await concatVideos(items);
+      if (!r.ok) return { ok: false, error: r.error };
+      // The continuous film (a done video node) + a Timeline of the source clips
+      // (so the user can re-order / trim and re-export).
+      const pos = placeAgentNode(nodeIds[0]);
+      const filmId = `n${idCounter.current++}`;
+      const filmNode: Node = {
+        id: filmId, type: 'videogen', position: pos,
+        data: { title: title || 'Film', model: 'ffmpeg', prompt: `Assembled ${items.length} clips`, status: 'done' as NodeStatus, resultUrl: r.resultUrl, progress: 1 },
+      };
+      const tlNode: Node = {
+        id: `n${idCounter.current++}`, type: 'timeline', position: { x: pos.x, y: pos.y + 320 },
+        data: { title: title ? `${title} · timeline` : 'Film timeline', clips },
+      };
+      setNodes((nds) => [...nds, filmNode, tlNode]);
+      setTimeout(() => fitView({ padding: 0.3, duration: 400, maxZoom: 1 }), 90);
+      return { ok: true, nodeId: filmId, resultUrl: r.resultUrl };
+    },
     async describe(nodeId, question) {
-      const n = getNode(nodeId);
-      const d = n?.data as { resultUrl?: string; imageUrl?: string } | undefined;
+      const d = getNode(nodeId)?.data as { resultUrl?: string; imageUrl?: string } | undefined;
       const url = d?.resultUrl || d?.imageUrl;
       if (!url) return { ok: false, error: `node ${nodeId} has no media` };
-      let imageUrl = url;
-      if (n?.type === 'videogen' || /\.mp4(\?|$)/.test(url)) {
-        const frame = await captureVideoFrame(url).catch(() => undefined);
-        if (frame) imageUrl = frame;
-      }
-      const r = await describeMedia(imageUrl, question);
+      // Backend handles both images and videos (it extracts a first frame via
+      // ffmpeg for clips), so just hand it the URL — no fragile in-browser capture.
+      const r = await describeMedia(url, question);
       return r.ok ? { ok: true, text: r.text } : { ok: false, error: r.error };
     },
     listCanvas() {
+      const edges = getEdges();
       return getNodes().map((n) => {
-        const d = n.data as { title?: string; label?: string; prompt?: string; resultUrl?: string; imageUrl?: string };
+        const d = n.data as { title?: string; label?: string; prompt?: string; resultUrl?: string; imageUrl?: string; status?: string };
         const hasResult = !!(d.resultUrl || d.imageUrl);
         const resultKind = n.type === 'videogen' ? 'video' : n.type === 'musicgen' ? 'music' : 'image';
-        return { nodeId: n.id, type: String(n.type), title: String(d.title || d.label || n.type), prompt: String(d.prompt || ''), hasResult, resultKind: hasResult ? (resultKind as 'image' | 'video' | 'music') : undefined };
+        const from = edges.filter((e) => e.target === n.id).map((e) => e.source);
+        const to = edges.filter((e) => e.source === n.id).map((e) => e.target);
+        return { nodeId: n.id, type: String(n.type), title: String(d.title || d.label || n.type), prompt: String(d.prompt || ''), hasResult, resultKind: hasResult ? (resultKind as 'image' | 'video' | 'music') : undefined, status: d.status, from, to };
       });
+    },
+    async deleteNodes(nodeIds) {
+      const set = new Set(nodeIds);
+      const removed = getNodes().filter((n) => set.has(n.id)).length;
+      setNodes((nds) => nds.filter((n) => !set.has(n.id)));
+      setEdges((eds) => eds.filter((e) => !set.has(e.source) && !set.has(e.target)));
+      return { ok: true, text: `Deleted ${removed} node(s).` };
+    },
+    async disconnectNodes(a, b) {
+      const match = (e: { source: string; target: string }) => (e.source === a && e.target === b) || (e.source === b && e.target === a);
+      const removed = getEdges().filter(match).length;
+      setEdges((eds) => eds.filter((e) => !match(e)));
+      return { ok: true, text: removed ? `Removed ${removed} edge(s) between ${a} and ${b}.` : `No edge between ${a} and ${b}.` };
+    },
+    async regenerateNode(nodeId) {
+      const n = getNode(nodeId);
+      if (!n) return { ok: false, error: `node ${nodeId} not found` };
+      const kind = n.type as 'imagegen' | 'videogen' | 'musicgen';
+      if (kind !== 'imagegen' && kind !== 'videogen' && kind !== 'musicgen') return { ok: false, error: `node ${nodeId} is not a generation node` };
+      const d = n.data as { model?: string; prompt?: string; referenceUrl?: string };
+      // Re-running a failed node often failed because of a bad/cross-family model;
+      // validate it against this kind's catalog and fix before re-running.
+      const catalog = kind === 'imagegen' ? IMAGE_MODELS : kind === 'videogen' ? VIDEO_MODELS : MUSIC_MODELS;
+      const fallback = kind === 'imagegen' ? agentImageModel : kind === 'videogen' ? agentVideoModel : MUSIC_MODELS[0].id;
+      const model = (d.model && catalog.some((m) => m.id === d.model)) ? d.model : fallback;
+      if (model !== d.model) setNodes((nds) => nds.map((x) => (x.id === nodeId ? { ...x, data: { ...x.data, model } } : x)));
+      const ref = (kind === 'imagegen' || kind === 'videogen') ? d.referenceUrl : undefined;
+      const res = await simulateGen(nodeId, kind, String(d.prompt || ''), ref, model);
+      return res.ok ? { ok: true, nodeId, resultUrl: res.resultUrl } : { ok: false, error: res.error };
     },
   };
 

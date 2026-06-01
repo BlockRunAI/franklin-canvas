@@ -32,7 +32,7 @@ import {
   extractPaymentDetails,
   createPaymentPayload,
 } from '@blockrun/llm';
-import { runAgentChat, runBackendTool, describeMedia, CANVAS_TOOL_NAMES } from './agent-tools.mjs';
+import { runAgentChat, runBackendTool, describeMedia, summarizeConversation, CANVAS_TOOL_NAMES } from './agent-tools.mjs';
 
 const PORT = 3100;
 const apiUrl = process.env.BLOCKRUN_API_URL || undefined;
@@ -155,6 +155,10 @@ async function generateImage(body, jobId) {
   if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.');
   const client = new ImageClient({ privateKey, apiUrl });
   const opts = { model: body.model || 'google/nano-banana' };
+  // Map the node's aspect ratio to an output size, and pass quality through.
+  const IMG_SIZE = { '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792', '4:3': '1024x768', '3:4': '768x1024' };
+  if (body.aspectRatio && IMG_SIZE[body.aspectRatio]) opts.size = IMG_SIZE[body.aspectRatio];
+  if (body.quality === 'standard' || body.quality === 'hd') opts.quality = body.quality;
   const before = client.getSpending?.();
   const result = body.imageUrl
     ? await client.edit(body.prompt, body.imageUrl, opts)
@@ -432,6 +436,16 @@ function probeHasAudio(file) {
   });
 }
 
+function probeDimensions(file) {
+  return new Promise((resolve) => {
+    const pp = spawn('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', file]);
+    let out = '';
+    pp.stdout.on('data', (d) => { out += d.toString(); });
+    pp.on('close', () => { const [w, h] = out.trim().split(',').map(Number); resolve({ w: w || 0, h: h || 0 }); });
+    pp.on('error', () => resolve({ w: 0, h: 0 }));
+  });
+}
+
 // mode 'grid' (default): all cells play simultaneously.
 // mode 'sequence': cells play one at a time in order — the active cell plays
 // while the others hold a frozen frame (first frame before their turn, last
@@ -552,6 +566,54 @@ async function stitchComparison(items, mode = 'grid', orientation = 'landscape',
 
     const outPath = path.join(JOBS_DIR, `${jobId}.mp4`);
     await runFfmpeg(['-y', ...inputs, '-filter_complex', fc, '-map', `[${outLabel}]`, ...audioArgs, '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', outPath]);
+    return { resultUrl: `/api/generated/${jobId}.mp4` };
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// Concatenate clips end-to-end into ONE continuous full-frame film (vs the grid
+// comparison above). Each clip is scaled+padded into a common frame (taken from
+// the first clip, capped at 1280 wide, even dims) so mismatched sizes/orientations
+// still join cleanly. Audio is concatenated when EVERY clip has a track; otherwise
+// the film is silent (concat needs matching stream counts).
+async function concatFilms(items) {
+  const urls = (Array.isArray(items) ? items : []).map((it) => (it && it.url) || it).filter(Boolean);
+  const n = urls.length;
+  if (n < 2) throw new Error('need at least 2 clips to assemble a film');
+  const jobId = `film_${crypto.randomUUID()}`;
+  const tmp = path.join(JOBS_DIR, jobId + '_tmp');
+  fs.mkdirSync(tmp, { recursive: true });
+  try {
+    const videoPaths = [];
+    for (let i = 0; i < n; i++) {
+      let vp = localGeneratedPath(urls[i]);
+      if (!vp) { const { ext } = await downloadTo(urls[i], path.join(tmp, `v${i}`), 'mp4'); vp = path.join(tmp, `v${i}.${ext}`); }
+      videoPaths.push(vp);
+    }
+    // Frame size from the first clip (even, ≤1280 wide).
+    const dim = await probeDimensions(videoPaths[0]);
+    let W = Math.min(1280, dim.w || 1280); W -= W % 2;
+    let H = dim.w ? Math.round(W * (dim.h / dim.w)) : 720; H -= H % 2;
+    const hasAudio = await Promise.all(videoPaths.map(probeHasAudio));
+    const allAudio = hasAudio.every(Boolean);
+
+    const inputs = [];
+    for (const v of videoPaths) inputs.push('-i', v);
+    const fit = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p`;
+    let fc = '';
+    const parts = [];
+    for (let i = 0; i < n; i++) {
+      fc += `[${i}:v]${fit}[v${i}];`;
+      if (allAudio) { fc += `[${i}:a]aresample=async=1:first_pts=0[a${i}];`; parts.push(`[v${i}][a${i}]`); }
+      else parts.push(`[v${i}]`);
+    }
+    fc += `${parts.join('')}concat=n=${n}:v=1:a=${allAudio ? 1 : 0}[outv]${allAudio ? '[outa]' : ''}`;
+    const map = ['-map', '[outv]'];
+    if (allAudio) map.push('-map', '[outa]', '-c:a', 'aac');
+    else map.push('-an');
+    const outPath = path.join(JOBS_DIR, `${jobId}.mp4`);
+    await runFfmpeg(['-y', ...inputs, '-filter_complex', fc, ...map, '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', outPath]);
     return { resultUrl: `/api/generated/${jobId}.mp4` };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -794,6 +856,15 @@ const server = http.createServer(async (req, res) => {
         const { privateKey, address } = getWallet();
         if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.' }, 400);
         const out = await runAgentChat({ model: body.model, messages: body.messages }, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        // Debug: log exactly which tools the model asked for (name + args) so we
+        // can see the agent's run history. Written to a file (immediate flush).
+        try {
+          const tc = out.message?.tool_calls;
+          const line = tc?.length
+            ? tc.map((c) => `${c.function?.name}(${(c.function?.arguments || '').replace(/\s+/g, ' ').slice(0, 200)})`).join('  ||  ')
+            : `(final reply, no tools) ${(out.message?.content || '').slice(0, 120)}`;
+          fs.appendFileSync(path.join(os.homedir(), '.franklin', 'agent-debug.log'), `[${new Date().toISOString()}] ${line}\n`);
+        } catch { /* ignore */ }
         return json(req, res, { ok: true, ...out });
       } catch (err) {
         console.warn(`[agent] chat FAIL: ${err.message || err}`);
@@ -816,6 +887,23 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         // Tool errors are non-fatal — the model sees them as an is_error result.
         return json(req, res, { ok: true, output: `Error: ${err.message || String(err)}`, isError: true });
+      }
+    }
+
+    // Auto-compact: summarize the early part of the agent conversation when it
+    // grows too large, so long sessions don't blow the context window.
+    if (p === '/api/agent/summarize' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      try {
+        const { privateKey, address } = getWallet();
+        if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found.' }, 400);
+        const summary = await summarizeConversation(body.messages, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        return json(req, res, { ok: true, summary });
+      } catch (err) {
+        console.warn(`[agent] summarize FAIL: ${err.message || err}`);
+        return json(req, res, { ok: false, error: err.message || String(err) }, 502);
       }
     }
 
@@ -880,6 +968,23 @@ const server = http.createServer(async (req, res) => {
         return json(req, res, { ok: true, ...out });
       } catch (err) {
         console.warn(`[comparison] stitch FAIL: ${err.message || err}`);
+        return json(req, res, { ok: false, error: err.message || String(err) }, 500);
+      }
+    }
+
+    // Concatenate clips into one continuous film (storyboard → film).
+    if (p === '/api/concat' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      const items = Array.isArray(body.items) ? body.items : [];
+      const t0 = Date.now();
+      try {
+        const out = await concatFilms(items);
+        console.log(`[concat] joined ${items.length} clips in ${Date.now() - t0}ms`);
+        return json(req, res, { ok: true, ...out });
+      } catch (err) {
+        console.warn(`[concat] FAIL: ${err.message || err}`);
         return json(req, res, { ok: false, error: err.message || String(err) }, 500);
       }
     }
