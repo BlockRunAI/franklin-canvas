@@ -1600,14 +1600,18 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .media-progress > div { height: 100%; background: var(--accent-gradient); transition: width 0.3s ease; }
 .media-overlay-hint { font-size: 11.5px; color: rgba(255,255,255,0.8); text-align: center; }
 
-/* upload card */
-.canvas-node.card-mode { width: 200px; padding: 0; border: 1px solid rgba(255,255,255,0.08); background: var(--bg-card); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-md); }
-.card-image { position: relative; aspect-ratio: 3 / 4; background: #08080a; }
+/* upload card — theme-aware. The empty drop area uses panel-soft so it
+   reads as a subtle inset on Gold/Light themes instead of the previous
+   hardcoded near-black square. The upload overlay button stays high-
+   contrast against any underlying image, so it gets its own pill bg. */
+.canvas-node.card-mode { width: 200px; padding: 0; border: 1px solid var(--border); background: var(--bg-card); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-md); }
+.card-image { position: relative; aspect-ratio: 3 / 4; background: var(--panel-soft); }
 .card-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-faint); font-size: 12.5px; }
 .card-upload-overlay {
   position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 10px; border-radius: 999px; background: rgba(0,0,0,0.55); color: #fff; font-size: 11.5px; cursor: pointer;
+  padding: 5px 10px; border-radius: 999px; background: var(--panel-bg); color: var(--fg); font-size: 11.5px; cursor: pointer;
+  border: 1px solid var(--panel-border);
 }
 
 /* generic node bodies (text/result/timeline) */

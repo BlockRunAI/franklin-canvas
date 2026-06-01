@@ -8,13 +8,14 @@ import {
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import type { Route } from '../types';
+import { useT, type StringKey } from '../i18n';
 
 type SettingsSection = 'wallet' | 'models' | 'canvas' | 'about';
 
-interface NavItem { id: Route; label: string; Icon: typeof Workflow; }
+interface NavItem { id: Route; labelKey: StringKey; Icon: typeof Workflow; }
 const ITEMS: NavItem[] = [
-  { id: 'canvas', label: 'Canvas', Icon: Workflow },
-  { id: 'projects', label: 'Projects', Icon: LayoutGrid },
+  { id: 'canvas',   labelKey: 'sidebar_canvas',   Icon: Workflow },
+  { id: 'projects', labelKey: 'sidebar_projects', Icon: LayoutGrid },
 ];
 
 interface Props {
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export default function Sidebar({ route, collapsed = false, onNavigate, onToggleCollapse, onOpenSettings }: Props) {
+  const t = useT();
   return (
     <nav
       className={`sidebar ${collapsed ? 'is-collapsed' : ''}`}
@@ -34,54 +36,57 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark">
           <Sparkles size={18} className="brand-icon" aria-hidden />
-          <span>Franklin Canvas</span>
+          <span>{t('sidebar_brand')}</span>
         </span>
         {onToggleCollapse && (
           <button
             type="button"
             className="sidebar-collapse"
             onClick={onToggleCollapse}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? t('sidebar_expand') : t('sidebar_collapse')}
             aria-pressed={collapsed}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={collapsed ? t('sidebar_expand') : t('sidebar_collapse')}
           >
             {collapsed ? <PanelLeftOpen size={16} aria-hidden /> : <PanelLeftClose size={16} aria-hidden />}
           </button>
         )}
       </div>
       <ul className="sidebar-nav">
-        {ITEMS.map(({ id, label, Icon }) => (
-          <li key={id}>
-            <button
-              className={`nav-item ${route === id ? 'active' : ''}`}
-              onClick={() => onNavigate(id)}
-              aria-current={route === id ? 'page' : undefined}
-              title={collapsed ? label : undefined}
-            >
-              <Icon size={16} strokeWidth={1.75} aria-hidden />
-              <span>{label}</span>
-            </button>
-          </li>
-        ))}
+        {ITEMS.map(({ id, labelKey, Icon }) => {
+          const label = t(labelKey);
+          return (
+            <li key={id}>
+              <button
+                className={`nav-item ${route === id ? 'active' : ''}`}
+                onClick={() => onNavigate(id)}
+                aria-current={route === id ? 'page' : undefined}
+                title={collapsed ? label : undefined}
+              >
+                <Icon size={16} strokeWidth={1.75} aria-hidden />
+                <span>{label}</span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <div className="sidebar-footer">
         <button
           className="nav-item"
           onClick={() => onOpenSettings?.('wallet')}
-          aria-label="Open wallet"
-          title={collapsed ? 'Wallet' : undefined}
+          aria-label={t('sidebar_wallet')}
+          title={collapsed ? t('sidebar_wallet') : undefined}
         >
           <WalletIcon size={16} strokeWidth={1.75} aria-hidden />
-          <span>Wallet</span>
+          <span>{t('sidebar_wallet')}</span>
         </button>
         <button
           className="nav-item"
           onClick={() => onOpenSettings?.('canvas')}
-          aria-label="Open settings"
-          title={collapsed ? 'Settings' : undefined}
+          aria-label={t('sidebar_settings')}
+          title={collapsed ? t('sidebar_settings') : undefined}
         >
           <Settings size={16} strokeWidth={1.75} aria-hidden />
-          <span>Settings</span>
+          <span>{t('sidebar_settings')}</span>
         </button>
         <div className="version" aria-hidden>franklin-canvas · v0.0.1</div>
       </div>

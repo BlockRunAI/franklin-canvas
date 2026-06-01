@@ -17,6 +17,7 @@ import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS } from './nodes';
 import ModelDropdown from '../components/ModelDropdown';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
 import { getWallet } from '../api/franklin';
+import { useT } from '../i18n';
 
 type Mode = 'imagegen' | 'videogen' | 'musicgen';
 
@@ -160,6 +161,7 @@ function ReferencePicker({
 }
 
 export default function PromptBar({ onSend }: Props) {
+  const t = useT();
   const { getNode, getNodes } = useReactFlow();
   const selectedIds = useStore((s) => s.nodes.filter((n) => n.selected).map((n) => n.id));
   const selectedId = selectedIds[0] ?? null;
@@ -259,12 +261,11 @@ export default function PromptBar({ onSend }: Props) {
         <div className="prompt-bar-banner" role="status">
           <AlertCircle size={13} aria-hidden />
           <span>
-            {walletState.isNew ? 'Wallet just created' : 'Wallet ready'} on{' '}
-            <strong>{walletState.network}</strong>. Send USDC to{' '}
+            {t(walletState.isNew ? 'pb_wallet_new' : 'pb_wallet_ready', { network: walletState.network })}{' '}
             <button type="button" className="prompt-bar-banner-addr" onClick={copyAddr} title="Copy full address">
               <code>{shortAddr}</code>
             </button>{' '}
-            to start generating.
+            {t('pb_wallet_tail')}
           </span>
         </div>
       )}
@@ -291,7 +292,7 @@ export default function PromptBar({ onSend }: Props) {
         <div className="pb-flex" />
         {bound && selectedNode && (
           <span className="pb-bound-chip">
-            Editing · <strong>{selectedNode.data?.title as string || meta.label}</strong> · {selectedId?.slice(0, 6)}
+            {t('pb_editing')} · <strong>{selectedNode.data?.title as string || meta.label}</strong> · {selectedId?.slice(0, 6)}
           </span>
         )}
       </div>
@@ -301,7 +302,7 @@ export default function PromptBar({ onSend }: Props) {
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         onKeyDown={onKeyDown}
-        placeholder="Describe anything you want to generate…"
+        placeholder={t('pb_placeholder')}
         rows={3}
       />
 

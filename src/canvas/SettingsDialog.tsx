@@ -11,17 +11,18 @@ import { getWallet } from '../api/franklin';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, TEXT_MODELS } from './nodes';
 import { usePrefsStore, type EdgeStyle } from './prefsStore';
 import { useThemeStore, type Theme } from './themeStore';
+import { useLocaleStore, useT, LOCALES, type Locale, type StringKey } from '../i18n';
 import type { WalletInfo, WalletChain } from '../types';
 
 type SectionId = 'wallet' | 'models' | 'canvas' | 'about';
 
-interface NavItem { id: SectionId; label: string; icon: LucideIcon; }
+interface NavItem { id: SectionId; labelKey: StringKey; icon: LucideIcon; }
 
 const NAV: NavItem[] = [
-  { id: 'wallet', label: 'Wallet', icon: Wallet },
-  { id: 'models', label: 'Models & pricing', icon: Boxes },
-  { id: 'canvas', label: 'Canvas', icon: SlidersHorizontal },
-  { id: 'about',  label: 'About', icon: Info },
+  { id: 'wallet', labelKey: 'settings_section_wallet', icon: Wallet },
+  { id: 'models', labelKey: 'settings_section_models', icon: Boxes },
+  { id: 'canvas', labelKey: 'settings_section_canvas', icon: SlidersHorizontal },
+  { id: 'about',  labelKey: 'settings_section_about',  icon: Info },
 ];
 
 interface Props {
@@ -184,28 +185,31 @@ function ModelsPane() {
 }
 
 function CanvasPane() {
+  const t = useT();
   const edgeStyle = usePrefsStore((s) => s.edgeStyle);
   const setEdgeStyle = usePrefsStore((s) => s.setEdgeStyle);
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
+  const locale = useLocaleStore((s) => s.locale);
+  const setLocale = useLocaleStore((s) => s.setLocale);
 
-  const themeOptions: { id: Theme; label: string; hint: string }[] = [
-    { id: 'dark',  label: 'Dark',  hint: 'Neutral zinc dark with the lime gradient accent.' },
-    { id: 'gold',  label: 'Gold',  hint: 'Warm cream + petrol-ink with a gold thread.' },
-    { id: 'light', label: 'Light', hint: 'Cool minimal white with petrol accent.' },
+  const themeOptions: { id: Theme; labelKey: StringKey; hintKey: StringKey }[] = [
+    { id: 'dark',  labelKey: 'canvas_theme_dark',  hintKey: 'canvas_theme_dark_hint' },
+    { id: 'gold',  labelKey: 'canvas_theme_gold',  hintKey: 'canvas_theme_gold_hint' },
+    { id: 'light', labelKey: 'canvas_theme_light', hintKey: 'canvas_theme_light_hint' },
   ];
 
-  const edgeOptions: { id: EdgeStyle; label: string; hint: string }[] = [
-    { id: 'animated', label: 'Animated', hint: 'A light pulse flows along each connection (lively).' },
-    { id: 'solid', label: 'Solid', hint: 'A static gradient — calm, still on-brand.' },
-    { id: 'subtle', label: 'Subtle', hint: 'A thin neutral line — minimal, no gradient.' },
+  const edgeOptions: { id: EdgeStyle; labelKey: StringKey; hintKey: StringKey }[] = [
+    { id: 'animated', labelKey: 'canvas_edges_animated', hintKey: 'canvas_edges_animated_hint' },
+    { id: 'solid',    labelKey: 'canvas_edges_solid',    hintKey: 'canvas_edges_solid_hint' },
+    { id: 'subtle',   labelKey: 'canvas_edges_subtle',   hintKey: 'canvas_edges_subtle_hint' },
   ];
 
   return (
     <div className="settings-pane-section">
-      <h2>Canvas</h2>
+      <h2>{t('settings_section_canvas')}</h2>
 
-      <h3 className="settings-subhead">Theme</h3>
+      <h3 className="settings-subhead">{t('canvas_theme')}</h3>
       <div className="settings-choices">
         {themeOptions.map((o) => (
           <button
@@ -214,13 +218,13 @@ function CanvasPane() {
             className={`settings-choice ${theme === o.id ? 'is-active' : ''}`}
             onClick={() => setTheme(o.id)}
           >
-            <span className="settings-choice-label">{o.label}</span>
-            <span className="settings-choice-hint">{o.hint}</span>
+            <span className="settings-choice-label">{t(o.labelKey)}</span>
+            <span className="settings-choice-hint">{t(o.hintKey)}</span>
           </button>
         ))}
       </div>
 
-      <h3 className="settings-subhead">Connection lines</h3>
+      <h3 className="settings-subhead">{t('canvas_edges')}</h3>
       <div className="settings-choices">
         {edgeOptions.map((o) => (
           <button
@@ -229,35 +233,44 @@ function CanvasPane() {
             className={`settings-choice ${edgeStyle === o.id ? 'is-active' : ''}`}
             onClick={() => setEdgeStyle(o.id)}
           >
-            <span className="settings-choice-label">{o.label}</span>
-            <span className="settings-choice-hint">{o.hint}</span>
+            <span className="settings-choice-label">{t(o.labelKey)}</span>
+            <span className="settings-choice-hint">{t(o.hintKey)}</span>
           </button>
         ))}
       </div>
 
-      <p className="settings-foot-note">Theme + connection style apply instantly across the canvas.</p>
+      <h3 className="settings-subhead">{t('canvas_language')}</h3>
+      <div className="settings-choices">
+        {LOCALES.map((l) => (
+          <button
+            key={l.id}
+            type="button"
+            className={`settings-choice ${locale === l.id ? 'is-active' : ''}`}
+            onClick={() => setLocale(l.id as Locale)}
+          >
+            <span className="settings-choice-label">{l.native}</span>
+            <span className="settings-choice-hint">{l.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <p className="settings-foot-note">{t('canvas_apply_hint')}</p>
     </div>
   );
 }
 
 function AboutPane() {
+  const t = useT();
   return (
     <div className="settings-pane-section">
-      <h2>About</h2>
-      <p className="settings-foot-note">
-        Franklin Canvas — a node-based AI media studio. Generate images, video and music on an
-        infinite canvas, paid live in USDC via x402 through the BlockRun gateway.
-      </p>
+      <h2>{t('settings_section_about')}</h2>
+      <p className="settings-foot-note">{t('about_blurb')}</p>
       <dl className="settings-kv">
-        <div><dt>Version</dt><dd>0.0.1</dd></div>
-        <div><dt>Gateway</dt><dd>BlockRun · x402 on Base &amp; Solana</dd></div>
+        <div><dt>{t('about_version')}</dt><dd>0.0.1</dd></div>
+        <div><dt>{t('about_gateway')}</dt><dd>BlockRun · x402 on Base &amp; Solana</dd></div>
       </dl>
-      <h3 className="settings-subhead">Credits</h3>
-      <p className="settings-foot-note">
-        The Prompt Library inside the canvas is sourced from the open BlockRunAI
-        case-library on GitHub. Each card lazy-loads from the upstream repo; credit
-        goes to the original prompt authors.
-      </p>
+      <h3 className="settings-subhead">{t('about_credits')}</h3>
+      <p className="settings-foot-note">{t('about_credits_blurb')}</p>
       <div className="settings-links">
         <a href="https://github.com/BlockRunAI/franklin-canvas" target="_blank" rel="noopener noreferrer">
           Repository <ExternalLink size={12} aria-hidden />
@@ -282,6 +295,7 @@ const PANES: Record<SectionId, ReactNode> = {
 
 export default function SettingsDialog({ open, onClose, initial = 'wallet' }: Props) {
   const [active, setActive] = useState<SectionId>(initial);
+  const t = useT();
 
   useEffect(() => {
     if (!open) return;
@@ -298,12 +312,12 @@ export default function SettingsDialog({ open, onClose, initial = 'wallet' }: Pr
         className="settings-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Settings"
+        aria-label={t('settings_title')}
         onClick={(e) => e.stopPropagation()}
       >
         <aside className="settings-rail">
           <div className="settings-rail-head">
-            <h2>Settings</h2>
+            <h2>{t('settings_title')}</h2>
           </div>
           <div className="settings-rail-items">
             {NAV.map((it) => {
@@ -316,7 +330,7 @@ export default function SettingsDialog({ open, onClose, initial = 'wallet' }: Pr
                   onClick={() => setActive(it.id)}
                 >
                   <Icon size={15} aria-hidden />
-                  <span>{it.label}</span>
+                  <span>{t(it.labelKey)}</span>
                 </button>
               );
             })}
@@ -326,7 +340,7 @@ export default function SettingsDialog({ open, onClose, initial = 'wallet' }: Pr
         <main className="settings-pane">
           <header className="settings-pane-head">
             <span className="settings-version">v0.0.1</span>
-            <button className="settings-close" onClick={onClose} aria-label="Close settings">
+            <button className="settings-close" onClick={onClose} aria-label={t('settings_close')}>
               <X size={16} aria-hidden />
             </button>
           </header>

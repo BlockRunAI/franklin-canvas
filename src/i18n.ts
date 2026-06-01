@@ -1,0 +1,200 @@
+// Tiny in-house i18n — one file, zero deps, zustand-backed locale store +
+// flat string dictionary. Only the high-traffic surface is translated
+// (sidebar, settings rail / Canvas / About, prompt bar banner + placeholder)
+// so each pane stays a single screen the user can compare side-by-side
+// without missing strings sticking out as English.
+
+import { create } from 'zustand';
+
+export type Locale = 'en' | 'zh-CN' | 'ja';
+
+export const LOCALES: { id: Locale; label: string; native: string }[] = [
+  { id: 'en',    label: 'English',          native: 'English' },
+  { id: 'zh-CN', label: 'Simplified Chinese', native: '简体中文' },
+  { id: 'ja',    label: 'Japanese',         native: '日本語' },
+];
+
+const STORAGE_KEY = 'franklin-canvas:locale';
+
+function loadLocale(): Locale {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY);
+    if (v === 'en' || v === 'zh-CN' || v === 'ja') return v;
+    // Fall back to the browser's preferred language if it matches.
+    const nav = navigator.language || '';
+    if (nav.startsWith('zh')) return 'zh-CN';
+    if (nav.startsWith('ja')) return 'ja';
+    return 'en';
+  } catch { return 'en'; }
+}
+
+interface LocaleState {
+  locale: Locale;
+  setLocale: (l: Locale) => void;
+}
+
+export const useLocaleStore = create<LocaleState>((set) => ({
+  locale: loadLocale(),
+  setLocale: (locale) => {
+    try { localStorage.setItem(STORAGE_KEY, locale); } catch { /* quota ignored */ }
+    set({ locale });
+  },
+}));
+
+// Flat key dictionary. Keys read like `area_subject` so they group naturally
+// in the source file. Strings can interpolate `{name}` placeholders.
+type Strings = Record<string, string>;
+
+const en: Strings = {
+  // Sidebar
+  sidebar_brand: 'Franklin Canvas',
+  sidebar_canvas: 'Canvas',
+  sidebar_projects: 'Projects',
+  sidebar_wallet: 'Wallet',
+  sidebar_settings: 'Settings',
+  sidebar_collapse: 'Collapse sidebar',
+  sidebar_expand: 'Expand sidebar',
+  // Settings dialog
+  settings_title: 'Settings',
+  settings_section_wallet: 'Wallet',
+  settings_section_models: 'Models & pricing',
+  settings_section_canvas: 'Canvas',
+  settings_section_about: 'About',
+  settings_close: 'Close settings',
+  // Canvas pane
+  canvas_theme: 'Theme',
+  canvas_theme_dark: 'Dark',
+  canvas_theme_gold: 'Gold',
+  canvas_theme_light: 'Light',
+  canvas_theme_dark_hint: 'Neutral zinc dark with the lime gradient accent.',
+  canvas_theme_gold_hint: 'Warm cream + petrol-ink with a gold thread.',
+  canvas_theme_light_hint: 'Cool minimal white with petrol accent.',
+  canvas_edges: 'Connection lines',
+  canvas_edges_animated: 'Animated',
+  canvas_edges_solid: 'Solid',
+  canvas_edges_subtle: 'Subtle',
+  canvas_edges_animated_hint: 'A light pulse flows along each connection (lively).',
+  canvas_edges_solid_hint: 'A static gradient — calm, still on-brand.',
+  canvas_edges_subtle_hint: 'A thin neutral line — minimal, no gradient.',
+  canvas_language: 'Language',
+  canvas_language_hint: 'Sidebar, settings, and the prompt-bar banner switch right away. Generated content stays in whatever language you prompt for.',
+  canvas_apply_hint: 'Theme, connection style, and language apply instantly across the canvas.',
+  // PromptBar
+  pb_placeholder: 'Describe anything you want to generate…',
+  pb_editing: 'Editing',
+  pb_wallet_ready: 'Wallet ready on {network}. Send USDC to',
+  pb_wallet_new: 'Wallet just created on {network}. Send USDC to',
+  pb_wallet_tail: 'to start generating.',
+  pb_send: 'Send',
+  // About pane
+  about_blurb: 'Franklin Canvas — a node-based AI media studio. Generate images, video and music on an infinite canvas, paid live in USDC via x402 through the BlockRun gateway.',
+  about_version: 'Version',
+  about_gateway: 'Gateway',
+  about_credits: 'Credits',
+  about_credits_blurb: 'The Prompt Library inside the canvas is sourced from the open BlockRunAI case-library on GitHub. Each card lazy-loads from the upstream repo; credit goes to the original prompt authors.',
+};
+
+const zhCN: Strings = {
+  sidebar_brand: 'Franklin Canvas',
+  sidebar_canvas: '画布',
+  sidebar_projects: '项目',
+  sidebar_wallet: '钱包',
+  sidebar_settings: '设置',
+  sidebar_collapse: '收起边栏',
+  sidebar_expand: '展开边栏',
+  settings_title: '设置',
+  settings_section_wallet: '钱包',
+  settings_section_models: '模型与价格',
+  settings_section_canvas: '画布',
+  settings_section_about: '关于',
+  settings_close: '关闭设置',
+  canvas_theme: '主题',
+  canvas_theme_dark: '深色',
+  canvas_theme_gold: '金色',
+  canvas_theme_light: '浅色',
+  canvas_theme_dark_hint: '中性深灰底,辅以青柠渐变点缀。',
+  canvas_theme_gold_hint: '暖米色 + 油墨蓝,带一缕金色。',
+  canvas_theme_light_hint: '清爽极简的白色,辅以油墨蓝。',
+  canvas_edges: '连接线样式',
+  canvas_edges_animated: '动画',
+  canvas_edges_solid: '实色',
+  canvas_edges_subtle: '极简',
+  canvas_edges_animated_hint: '一道光沿连线流动,有生气。',
+  canvas_edges_solid_hint: '静态渐变 —— 稳重,依然有品牌色。',
+  canvas_edges_subtle_hint: '一条细灰线 —— 极简,无渐变。',
+  canvas_language: '语言',
+  canvas_language_hint: '边栏、设置和提示栏横幅立即切换。生成内容仍用你输入提示词所用的语言。',
+  canvas_apply_hint: '主题、连线样式和语言立即应用到整个画布。',
+  pb_placeholder: '描述你想生成的任何东西……',
+  pb_editing: '正在编辑',
+  pb_wallet_ready: '已在 {network} 准备好钱包。请向',
+  pb_wallet_new: '已在 {network} 自动创建钱包。请向',
+  pb_wallet_tail: '充入 USDC 以开始生成。',
+  pb_send: '发送',
+  about_blurb: 'Franklin Canvas —— 节点式 AI 媒体工作室。在无限画布上生成图像、视频与音乐,每次调用通过 BlockRun 网关以 x402 即时结算 USDC。',
+  about_version: '版本',
+  about_gateway: '网关',
+  about_credits: '致谢',
+  about_credits_blurb: '画布中的提示词库源自 GitHub 上 BlockRunAI 公开的 case-library。每张卡片在被滚动到视图内时才向上游仓库懒加载;原作者享有版权。',
+};
+
+const ja: Strings = {
+  sidebar_brand: 'Franklin Canvas',
+  sidebar_canvas: 'キャンバス',
+  sidebar_projects: 'プロジェクト',
+  sidebar_wallet: 'ウォレット',
+  sidebar_settings: '設定',
+  sidebar_collapse: 'サイドバーを折りたたむ',
+  sidebar_expand: 'サイドバーを展開',
+  settings_title: '設定',
+  settings_section_wallet: 'ウォレット',
+  settings_section_models: 'モデルと料金',
+  settings_section_canvas: 'キャンバス',
+  settings_section_about: 'バージョン情報',
+  settings_close: '設定を閉じる',
+  canvas_theme: 'テーマ',
+  canvas_theme_dark: 'ダーク',
+  canvas_theme_gold: 'ゴールド',
+  canvas_theme_light: 'ライト',
+  canvas_theme_dark_hint: 'ニュートラルな亜鉛色ダーク、ライムグラデのアクセント。',
+  canvas_theme_gold_hint: '温かいクリーム + ペトロールインク、金の糸を一筋。',
+  canvas_theme_light_hint: 'クールなミニマル白、ペトロールアクセント。',
+  canvas_edges: '接続線',
+  canvas_edges_animated: 'アニメーション',
+  canvas_edges_solid: 'ソリッド',
+  canvas_edges_subtle: 'サブトル',
+  canvas_edges_animated_hint: '光のパルスが各接続線を流れる(活き活き)。',
+  canvas_edges_solid_hint: '静的なグラデーション ― 落ち着いた、ブランドに沿った見た目。',
+  canvas_edges_subtle_hint: '細いニュートラル線 ― ミニマル、グラデーションなし。',
+  canvas_language: '言語',
+  canvas_language_hint: 'サイドバー、設定、プロンプトバーのバナーがすぐに切り替わります。生成内容はプロンプトで使用した言語のままです。',
+  canvas_apply_hint: 'テーマ、接続線スタイル、言語は即座にキャンバス全体に反映されます。',
+  pb_placeholder: '生成したいものを記述してください…',
+  pb_editing: '編集中',
+  pb_wallet_ready: '{network} でウォレット準備完了。USDC を',
+  pb_wallet_new: '{network} にウォレットを自動作成しました。USDC を',
+  pb_wallet_tail: 'に送金して生成を始めましょう。',
+  pb_send: '送信',
+  about_blurb: 'Franklin Canvas — ノードベースの AI メディアスタジオ。無限キャンバス上で画像、ビデオ、音楽を生成し、BlockRun ゲートウェイ経由で x402 を使い USDC を毎回その場で支払います。',
+  about_version: 'バージョン',
+  about_gateway: 'ゲートウェイ',
+  about_credits: 'クレジット',
+  about_credits_blurb: 'キャンバス内のプロンプトライブラリは GitHub の公開 BlockRunAI case-library から取得しています。各カードは表示時に上流リポジトリから遅延読み込みされ、著作権は元のプロンプト作者に帰属します。',
+};
+
+const DICT: Record<Locale, Strings> = { en, 'zh-CN': zhCN, ja };
+
+export type StringKey = keyof typeof en;
+
+/** React hook returning a `t(key, vars?)` translator bound to the active locale. */
+export function useT(): (key: StringKey, vars?: Record<string, string | number>) => string {
+  const locale = useLocaleStore((s) => s.locale);
+  return (key, vars) => {
+    const table = DICT[locale] ?? en;
+    let s = table[key] ?? en[key] ?? String(key);
+    if (vars) {
+      for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v));
+    }
+    return s;
+  };
+}
