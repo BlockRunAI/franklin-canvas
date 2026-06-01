@@ -1,5 +1,5 @@
 // Prompt library — a searchable gallery of curated prompt cases from the
-// BlockRun case-library. The INDEX gives titles + metadata for all ~848
+// BlockRun Prompt-Case-Hub. The INDEX gives titles + metadata for all ~848
 // cases in one fetch; each card then lazily loads its own prompt body +
 // preview image (via IntersectionObserver) only when it scrolls into view,
 // so we get the full image+prompt look without pulling hundreds of files.
@@ -29,6 +29,11 @@ function PromptCard({
   );
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
+  // Thumbnail: the index already carries a preview URL, so show it immediately
+  // instead of waiting for the per-card detail fetch (otherwise every cover sits
+  // black until its detail loads). Detail can override once it arrives.
+  const coverImg = detail?.image || item.image;
 
   // Lazy-load this card's detail when it scrolls into view.
   useEffect(() => {
@@ -70,9 +75,9 @@ function PromptCard({
   return (
     <li ref={ref} className="prompt-card">
       <div className="prompt-card-cover">
-        {detail?.image
-          ? <img src={detail.image} alt="" loading="lazy" onError={(e) => { (e.currentTarget.style.display = 'none'); }} />
-          : <div className="prompt-card-cover-ph"><ImageIcon size={20} strokeWidth={1.4} aria-hidden /></div>}
+        {coverImg && !imgFailed
+          ? <img src={coverImg} alt="" loading="lazy" onError={() => setImgFailed(true)} />
+          : <div className="prompt-card-cover-ph"><ImageIcon size={22} strokeWidth={1.4} aria-hidden /></div>}
       </div>
       <div className="prompt-card-body">
         <div className="prompt-card-title" title={item.title}>{item.title}</div>
@@ -214,11 +219,11 @@ export default function PromptLibrary({ open, onClose, onUse }: Props) {
         <footer className="prompt-lib-foot">
           Sourced from the open{' '}
           <a
-            href="https://github.com/BlockRunAI/Claude-Code-GPT-IMAGE2-SeeDance-BlockRun"
+            href="https://github.com/BlockRunAI/Prompt-Case-Hub"
             target="_blank"
             rel="noopener noreferrer"
           >
-            BlockRunAI case-library <ExternalLink size={11} aria-hidden />
+            BlockRunAI Prompt-Case-Hub <ExternalLink size={11} aria-hidden />
           </a>{' '}
           on GitHub. Cases load on demand from the upstream repo — credit goes to the original authors.
         </footer>

@@ -278,7 +278,7 @@ function AboutPane() {
         <a href="https://github.com/BlockRunAI/Franklin" target="_blank" rel="noopener noreferrer">
           Franklin core <ExternalLink size={12} aria-hidden />
         </a>
-        <a href="https://github.com/BlockRunAI/Claude-Code-GPT-IMAGE2-SeeDance-BlockRun" target="_blank" rel="noopener noreferrer">
+        <a href="https://github.com/BlockRunAI/Prompt-Case-Hub" target="_blank" rel="noopener noreferrer">
           Prompt library source <ExternalLink size={12} aria-hidden />
         </a>
       </div>

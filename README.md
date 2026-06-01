@@ -45,7 +45,7 @@ x402 plumbing, but a separate product aimed at creators rather than CLI users.
 - **Group / Frame.** Drag the frame, the contents follow (Figma-style sync drag).
   No data model rewrite — purely positional.
 - **Prompt library.** 848 ready-made cases scraped from the open
-  [BlockRunAI case-library](https://github.com/BlockRunAI/Claude-Code-GPT-IMAGE2-SeeDance-BlockRun),
+  [BlockRunAI Prompt-Case-Hub](https://github.com/BlockRunAI/Prompt-Case-Hub),
   filtered two-tier: workflow (text→image · image→image · text→video · image→video)
   then tag. Clicking *Use* drops the right node type (video prompts → videogen,
   image prompts → imagegen).
@@ -169,7 +169,7 @@ scripts/start.mjs  one-command launcher (backend + UI multiplexed stdout)
 ## Credits
 
 - The Prompt Library lazy-loads cases from the open
-  [BlockRunAI case-library](https://github.com/BlockRunAI/Claude-Code-GPT-IMAGE2-SeeDance-BlockRun)
+  [BlockRunAI Prompt-Case-Hub](https://github.com/BlockRunAI/Prompt-Case-Hub)
   — credit goes to the original prompt authors.
 - Wallet + x402 payment is the [Franklin core](https://github.com/BlockRunAI/Franklin)
   SDK (`@blockrun/llm`).

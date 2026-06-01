@@ -1746,6 +1746,12 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .model-dropdown-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); font-size: 12.5px; cursor: pointer; text-align: left; }
 .model-dropdown-item:hover { background: var(--bg-hover); }
 .model-dropdown-item.is-active { color: var(--accent); }
+/* Downward variant (used inside the Text node, whose dropdown sits at the top). */
+.model-dropdown-menu.is-down { top: calc(100% + 6px); bottom: auto; }
+/* Text-node model picker: full-width button + don't let the node clip the menu. */
+.node-model-dd { width: 100%; }
+.node-model-dd .model-dropdown-btn { width: 100%; max-width: none; justify-content: space-between; }
+.canvas-node.node-text { overflow: visible; }
 
 /* ── Prompt bar ── */
 .prompt-bar {
@@ -1826,22 +1832,17 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .pb-ref-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pb-ref-tile.is-selected { border-color: var(--accent); }
 
-/* ── Lightbox ── */
-/* Quick-Look-style preview. z-index sits above React Flow's NodeToolbar
-   (which portals to body around z-index 50). When the body has the
-   `is-previewing` class we also hide any leaking node toolbars so they
-   don't draw over the image. */
+/* ── Preview dialog (Lightbox) ── */
+/* Windowed preview: image on the left, prompt + metadata on the right.
+   Overlay sits above React Flow's body-portaled NodeToolbar (z ~50) and
+   the body.is-previewing rules hide any other floating chrome that would
+   otherwise punch through the dimmer. */
 .lightbox-overlay {
   position: fixed; inset: 0; z-index: 9999;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(7,7,10,0.92);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  background: transparent;
+  padding: 32px;
 }
-/* While the Lightbox is open, suppress every floating chrome element that
-   the underlying canvas would otherwise punch through the overlay with —
-   not just the React Flow NodeToolbar portal (which lives outside the
-   .react-flow tree) but also the per-node corner-delete X, the side +
-   handles, the action menu, and the connect menu. */
 body.is-previewing .react-flow .node-toolbar-pill,
 body.is-previewing .react-flow__node-toolbar,
 body.is-previewing .node-corner-delete,
@@ -1851,67 +1852,245 @@ body.is-previewing .connect-menu,
 body.is-previewing .video-settings-panel,
 body.is-previewing .lyrics-panel { display: none !important; }
 
-/* Fit mode (default): image obeys max-w/h, sits centered. */
-.lightbox-stage {
-  width: 100vw; height: 100vh;
-  display: flex; align-items: center; justify-content: center;
+.preview-window {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  width: min(1400px, 100%);
+  height: min(900px, 100%);
+  background: var(--bg-elevated, #141417);
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 14px;
   overflow: hidden;
-  user-select: none;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.55);
 }
-.lightbox-media {
-  max-width: 92vw; max-height: 90vh;
-  border-radius: 12px; object-fit: contain;
+.preview-media {
+  display: flex; align-items: center; justify-content: center;
+  background: #0a0a0c;
+  min-width: 0; min-height: 0;
+  padding: 28px;
 }
-
-/* Zoom mode (after click): image at natural pixels, stage scrolls. The
-   `padding` keeps the image clear of the close button + nav arrows.
-   block + margin: auto re-centers if the natural size is smaller than
-   the viewport. */
-.lightbox-stage.is-zoomed {
+.preview-media-img,
+.preview-media-video {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
   display: block;
-  overflow: auto;
-  padding: 80px 24px;
+  border-radius: 6px;
 }
-.lightbox-stage.is-zoomed .lightbox-media {
-  max-width: none; max-height: none;
-  display: block; margin: 0 auto;
-  border-radius: 0;
+.preview-media-audio { width: 80%; }
+
+.preview-info {
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--border, rgba(255,255,255,0.08));
+  background: var(--panel-bg, #1a1a1e);
+  padding: 18px 18px 16px;
+  gap: 14px;
+  min-width: 0;
+  overflow-y: auto;
+}
+.preview-info-head {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.preview-info-head h2 {
+  margin: 0; font-size: 13px; font-weight: 500;
+  color: var(--fg-dim, rgba(255,255,255,0.65));
+  letter-spacing: 0.02em;
+}
+.preview-close {
+  width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: var(--fg-dim, rgba(255,255,255,0.6));
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.preview-close:hover { background: var(--bg-hover, rgba(255,255,255,0.06)); color: var(--fg, #fff); }
+
+.preview-info-card {
+  background: var(--panel-soft, rgba(255,255,255,0.04));
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.06));
+  border-radius: 10px;
+  padding: 14px;
+}
+.preview-prompt-card {
+  min-height: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.preview-prompt-text {
+  margin: 0; font-size: 13px; line-height: 1.55;
+  color: var(--fg, #fff);
+  word-break: break-word; white-space: pre-wrap;
+}
+.preview-prompt-empty {
+  margin: 0; font-size: 13px; color: var(--fg-faint, rgba(255,255,255,0.35));
 }
 
-.lightbox-audio { width: 70vw; }
-.lightbox-close {
-  position: absolute; top: 20px; right: 24px;
-  width: 40px; height: 40px; border-radius: 50%; border: 0;
-  background: rgba(0,0,0,0.45); color: #fff;
-  display: inline-flex; align-items: center; justify-content: center;
-  cursor: pointer; backdrop-filter: blur(8px);
-  opacity: 0.55; transition: opacity 0.18s ease, background 0.18s ease;
+.preview-info-section {
+  margin: 4px 0 0;
+  font-size: 13px; font-weight: 500;
+  color: var(--fg-dim, rgba(255,255,255,0.65));
+  letter-spacing: 0.02em;
 }
-.lightbox-overlay:hover .lightbox-close { opacity: 1; }
-.lightbox-close:hover { background: rgba(0,0,0,0.7); }
-.lightbox-zoom-badge {
-  position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
-  padding: 5px 12px; border-radius: 999px;
-  background: rgba(255,255,255,0.10); color: #fff; font-size: 12px;
-  font-variant-numeric: tabular-nums; backdrop-filter: blur(8px);
-  pointer-events: none;
+.preview-info-kv {
+  display: flex; flex-direction: column; gap: 10px;
 }
-/* Nav arrows: fade them out when idle so they don't sit visually on top of
-   the video / image. Pop back in on hover so they're still reachable.
-   The whole overlay is a hover surface, so any cursor movement reveals
-   them. */
-.lightbox-nav {
-  position: absolute; top: 50%; transform: translateY(-50%);
-  width: 48px; height: 48px; border-radius: 50%; border: 0;
-  background: rgba(0,0,0,0.45); color: #fff;
-  display: inline-flex; align-items: center; justify-content: center;
-  cursor: pointer; backdrop-filter: blur(8px);
-  opacity: 0.25; transition: opacity 0.18s ease, background 0.18s ease, transform 0.18s ease;
+.preview-kv-row {
+  display: flex; align-items: baseline; gap: 12px;
+  font-size: 13px;
 }
-.lightbox-overlay:hover .lightbox-nav { opacity: 1; }
-.lightbox-nav:hover { background: rgba(0,0,0,0.7); transform: translateY(-50%) scale(1.08); }
-.lightbox-prev { left: 24px; }
-.lightbox-next { right: 24px; }
+.preview-kv-key {
+  flex-shrink: 0;
+  color: var(--fg-faint, rgba(255,255,255,0.45));
+  min-width: 64px;
+}
+.preview-kv-val {
+  color: var(--fg, #fff);
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-download-btn {
+  margin-top: auto;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 40px; padding: 0 18px;
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.10));
+  background: var(--panel-soft, rgba(255,255,255,0.05));
+  color: var(--fg, #fff);
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  align-self: stretch;
+}
+.preview-download-btn:hover {
+  background: var(--bg-hover, rgba(255,255,255,0.08));
+}
+
+@media (max-width: 820px) {
+  .preview-window { grid-template-columns: 1fr; grid-template-rows: 1fr auto; height: 100%; }
+  .preview-info { border-left: 0; border-top: 1px solid var(--border, rgba(255,255,255,0.08)); max-height: 45%; }
+}
+
+/* ── Canvas view-bar zoom dropdown ── */
+.view-bar-zoom-wrap { position: relative; display: inline-flex; }
+/* .view-bar-pct is now a <button>; strip the global button chrome so it
+   reads as the plain % label it was before, but stays clickable. */
+button.view-bar-pct {
+  border: 0;
+  background: transparent;
+  padding: 2px 6px;
+  border-radius: 7px;
+  min-width: 46px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); border-color: transparent; }
+.view-bar-zoom-backdrop { position: fixed; inset: 0; z-index: 40; }
+.view-bar-zoom-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 41;
+  min-width: 192px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.zoom-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.zoom-menu-item:hover { background: var(--bg-hover); border-color: transparent; }
+.zoom-menu-kbd {
+  font-size: 11px;
+  color: var(--fg-faint);
+  font-family: inherit;
+  background: transparent;
+  padding: 0;
+}
+.zoom-menu-divider { height: 1px; margin: 4px 6px; background: var(--panel-border); }
+
+/* ── Save-to-collection popover (in the node toolbar) ── */
+.save-collection-menu {
+  width: 220px; padding: 8px;
+  border-radius: 12px;
+  background: var(--panel-bg); border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.save-collection-head { display: flex; align-items: center; gap: 6px; padding: 2px 6px 6px; font-size: 11.5px; color: var(--fg-faint); }
+.save-collection-list { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.save-collection-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); font-size: 12.5px; cursor: pointer; text-align: left; }
+.save-collection-item:hover { background: var(--bg-hover); }
+.save-collection-item.is-in { color: var(--accent); }
+.save-collection-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-collection-new { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--fg-dim); font-size: 12.5px; cursor: pointer; }
+.save-collection-new:hover { background: var(--bg-hover); color: var(--fg); }
+.save-collection-create { display: flex; gap: 6px; padding: 2px; }
+.save-collection-input { flex: 1; min-width: 0; padding: 6px 8px; font-size: 12.5px; border-radius: 8px; }
+.save-collection-add { padding: 6px 10px; font-size: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-soft); color: var(--fg); cursor: pointer; }
+.save-collection-done { margin-top: 2px; padding: 6px; font-size: 12px; border: 0; border-radius: 8px; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
+
+/* ── Collections (收藏夹) panel ── */
+.collections-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(7,7,10,0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); padding: 32px; }
+.collections-dialog { display: flex; width: min(960px, 100%); height: min(640px, 100%); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-lg); }
+.collections-rail { width: 220px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 14px 10px; display: flex; flex-direction: column; gap: 6px; background: var(--panel-bg); }
+.collections-rail-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 6px; }
+.collections-rail-head h2 { font-size: 14px; color: var(--fg); margin: 0; }
+.collections-icon-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--fg-dim); cursor: pointer; font-size: 12.5px; }
+.collections-icon-btn:hover { background: var(--bg-hover); color: var(--fg); }
+.collections-icon-btn.collections-danger:hover { color: #ef4444; background: rgba(239,68,68,0.10); }
+.collections-rename-label { font-size: 12px; }
+.collections-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
+.collections-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--fg-dim); font-size: 13px; text-align: left; cursor: pointer; }
+.collections-item:hover { background: var(--bg-hover); color: var(--fg); }
+.collections-item.is-active { background: var(--accent-bg); color: var(--accent); }
+.collections-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collections-item-count { font-size: 11px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.collections-rename-input, .collections-create-input { width: 100%; padding: 7px 9px; font-size: 13px; border-radius: 9px; }
+.collections-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.collections-main-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.collections-main-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.collections-main-title > span:first-child { font-size: 15px; font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collections-main-count { font-size: 12px; color: var(--fg-faint); flex-shrink: 0; }
+.collections-main-actions { display: flex; align-items: center; gap: 4px; }
+.collections-close { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--fg-dim); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.collections-close:hover { background: var(--bg-hover); color: var(--fg); }
+.collections-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--fg-faint); padding: 24px; text-align: center; }
+.collections-empty p { margin: 0; font-size: 13px; color: var(--fg-dim); }
+.collections-empty-hint { max-width: 340px; font-size: 12px !important; color: var(--fg-faint) !important; line-height: 1.5; }
+.collections-grid { list-style: none; margin: 0; padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; overflow-y: auto; }
+.collections-tile { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-card); display: flex; flex-direction: column; }
+.collections-tile:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+.collections-tile-media { position: relative; aspect-ratio: 1 / 1; background: var(--panel-soft); cursor: pointer; overflow: hidden; }
+.collections-tile-media img, .collections-tile-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.collections-tile-audio { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--fg-faint); }
+.collections-tile-kind { position: absolute; top: 6px; left: 6px; width: 20px; height: 20px; border-radius: 6px; background: rgba(20,20,24,0.7); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+.collections-tile-body { padding: 8px 10px 4px; }
+.collections-tile-title { display: block; font-size: 12.5px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collections-tile-model { display: block; font-size: 11px; color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collections-tile-actions { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px 10px; }
+.collections-tile-use { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 0; border-radius: 8px; background: var(--accent-bg); color: var(--accent); font-size: 12px; cursor: pointer; }
+.collections-tile-del { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--fg-faint); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.collections-tile-del:hover { background: rgba(239,68,68,0.10); color: #ef4444; }
 
 /* ── Settings dialog ── */
 .settings-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(7,7,10,0.8); backdrop-filter: blur(6px); }
@@ -2048,8 +2227,9 @@ body.is-previewing .lyrics-panel { display: none !important; }
 .prompt-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
 .prompt-card { display: flex; flex-direction: column; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-card); overflow: hidden; transition: border-color 0.14s ease, box-shadow 0.14s ease; }
 .prompt-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
-.prompt-card-cover { aspect-ratio: 16 / 10; background: #0c0c0e; overflow: hidden; }
+.prompt-card-cover { aspect-ratio: 16 / 10; background: var(--panel-soft); overflow: hidden; }
 .prompt-card-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.prompt-card-cover-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--fg-faint); background: var(--panel-soft); }
 .prompt-card-body { padding: 10px 12px 6px; flex: 1; }
 .prompt-card-title { font-size: 13px; font-weight: 600; color: var(--fg); margin-bottom: 4px; }
 .prompt-card-text { font-size: 11.5px; line-height: 1.5; color: var(--fg-dim); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -2166,7 +2346,9 @@ body.is-previewing .lyrics-panel { display: none !important; }
   background: transparent;
   border-radius: 14px;
   overflow: visible;
+  cursor: grab;
 }
+.timeline-track:active { cursor: grabbing; }
 
 .timeline-ruler {
   position: relative; height: 14px; margin-bottom: 6px;
@@ -2309,7 +2491,7 @@ body.is-previewing .lyrics-panel { display: none !important; }
 
 /* Modal / dialog open animation */
 .settings-overlay { animation: overlay-in 0.16s ease-out; }
-.settings-dialog, .prompt-lib, .annotate-modal, .action-menu, .video-settings-panel, .lyrics-panel, .timeline-picker, .connect-menu, .model-dropdown-menu, .pb-ref-menu, .lightbox-stage {
+.settings-dialog, .prompt-lib, .annotate-modal, .action-menu, .video-settings-panel, .lyrics-panel, .timeline-picker, .connect-menu, .model-dropdown-menu, .pb-ref-menu, .preview-window, .collections-dialog, .save-collection-menu {
   animation: dialog-in 0.18s cubic-bezier(0.32, 0.72, 0, 1);
 }
 @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }

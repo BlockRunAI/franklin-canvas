@@ -1,16 +1,22 @@
-// Fullscreen media preview — Quick Look-style.
-// Default mode: image fit-to-viewport (object-fit: contain).
-// Click the image: toggle into "actual size" mode where the stage scrolls
-// natively. Click again to return to fit. Esc / backdrop click to close.
-// Video & audio use the browser's native controls.
-//
-// The transform-based pan/zoom from the previous revision was tricky to
-// keep in sync (stale closures + clipped strip on rapid wheel events).
-// Native overflow:auto on the stage gives the same pannable feel for free
-// and matches what users expect from system-level image viewers.
+// Windowed preview dialog — image on the left, prompt + info on the right.
+// Backdrop click or Escape closes; arrow keys page through siblings; the
+// info panel exposes the generation metadata (model, quality, ratio,
+// file size, date, creator) plus a Download button.
 
 import { useEffect, useState } from 'react';
-import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { X, Download } from 'lucide-react';
+import { useT } from '../i18n';
+
+export interface PreviewMeta {
+  prompt?: string;
+  model?: string;       // human label, e.g. "Nano Banana Pro"
+  quality?: string;     // e.g. "2K", "1080p"
+  ratio?: string;       // e.g. "16:9"
+  durationS?: number;   // video only
+  createdAt?: number;   // epoch ms
+  creator?: string;     // display name
+}
 
 interface Props {
   src: string;
@@ -18,71 +24,148 @@ interface Props {
   onClose: () => void;
   onPrev?: () => void;
   onNext?: () => void;
+  meta?: PreviewMeta;
+  onDownload?: () => void;
 }
 
-export default function Lightbox({ src, kind, onClose, onPrev, onNext }: Props) {
-  const [zoomed, setZoomed] = useState(false);
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
-  // Reset zoom whenever the source changes (clicking next/prev).
-  useEffect(() => { setZoomed(false); }, [src]);
+function formatDate(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}/${m}/${day}`;
+}
 
-  // Suppress floating React Flow node toolbars / corner-delete / add-side
-  // while the preview is open — those portal to body and used to bleed
-  // over the image.
+export default function Lightbox({ src, kind, onClose, onPrev, onNext, meta, onDownload }: Props) {
+  const t = useT();
+  const [fileSize, setFileSize] = useState<number | null>(null);
+
   useEffect(() => {
     document.body.classList.add('is-previewing');
     return () => document.body.classList.remove('is-previewing');
   }, []);
 
-  // Keyboard: Esc close, arrows = prev/next (also reset zoom), space toggles
-  // zoom on images.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowLeft') { setZoomed(false); onPrev?.(); }
-      else if (e.key === 'ArrowRight') { setZoomed(false); onNext?.(); }
-      else if (e.key === ' ' && kind === 'image') { e.preventDefault(); setZoomed((z) => !z); }
+      else if (e.key === 'ArrowLeft') onPrev?.();
+      else if (e.key === 'ArrowRight') onNext?.();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, onPrev, onNext, kind]);
+  }, [onClose, onPrev, onNext]);
 
-  const onImageClick = (e: React.MouseEvent) => {
-    if (kind !== 'image') return;
-    e.stopPropagation();
-    setZoomed((z) => !z);
-  };
+  // Measure the resource size — the asset is already cached after the node
+  // rendered it, so fetch() resolves from cache. data: URLs compute locally.
+  useEffect(() => {
+    let cancelled = false;
+    setFileSize(null);
+    if (src.startsWith('data:')) {
+      const idx = src.indexOf(',');
+      if (idx >= 0) {
+        const b64 = src.slice(idx + 1);
+        // base64 → bytes: 4 chars => 3 bytes, minus padding.
+        const pad = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+        setFileSize(Math.floor((b64.length * 3) / 4) - pad);
+      }
+      return;
+    }
+    fetch(src, { method: 'GET', cache: 'force-cache' })
+      .then((r) => r.blob())
+      .then((b) => { if (!cancelled) setFileSize(b.size); })
+      .catch(() => { /* size remains null — drop the row */ });
+    return () => { cancelled = true; };
+  }, [src]);
 
-  return (
-    <div className="lightbox-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label="Preview">
-      <button className="lightbox-close" onClick={onClose} aria-label="Close"><X size={20} aria-hidden /></button>
-      {onPrev && (
-        <button className="lightbox-nav lightbox-prev" onClick={(e) => { e.stopPropagation(); setZoomed(false); onPrev(); }} aria-label="Previous">
-          <ChevronLeft size={28} aria-hidden />
-        </button>
-      )}
-      <div
-        className={`lightbox-stage ${zoomed ? 'is-zoomed' : ''}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {kind === 'image' && (
-          <img
-            src={src}
-            alt=""
-            className="lightbox-media"
-            draggable={false}
-            onClick={onImageClick}
-            style={{ cursor: zoomed ? 'zoom-out' : 'zoom-in' }}
-          />
-        )}
-        {kind === 'video' && <video src={src} controls autoPlay className="lightbox-media" />}
-        {kind === 'audio' && <audio src={src} controls autoPlay className="lightbox-audio" />}
+  // Portal to <body> — a React Flow node carries a CSS transform, and a
+  // fixed-position child is positioned relative to the nearest transformed
+  // ancestor, not the viewport. Without this the window renders trapped
+  // inside the node's box.
+  return createPortal(
+    <div className="lightbox-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label={t('preview_title')}>
+      <div className="preview-window" onClick={(e) => e.stopPropagation()}>
+        <div className="preview-media">
+          {kind === 'image' && <img src={src} alt="" className="preview-media-img" draggable={false} />}
+          {kind === 'video' && <video src={src} controls autoPlay className="preview-media-video" />}
+          {kind === 'audio' && <audio src={src} controls autoPlay className="preview-media-audio" />}
+        </div>
+
+        <aside className="preview-info">
+          <header className="preview-info-head">
+            <h2>{t('preview_prompt')}</h2>
+            <button className="preview-close" onClick={onClose} aria-label={t('preview_close')}>
+              <X size={18} aria-hidden />
+            </button>
+          </header>
+
+          <div className="preview-info-card preview-prompt-card">
+            {meta?.prompt
+              ? <p className="preview-prompt-text">{meta.prompt}</p>
+              : <p className="preview-prompt-empty">—</p>}
+          </div>
+
+          <h3 className="preview-info-section">{t('preview_info')}</h3>
+          <div className="preview-info-card preview-info-kv">
+            {meta?.model && (
+              <div className="preview-kv-row">
+                <span className="preview-kv-key">{t('preview_model')}</span>
+                <span className="preview-kv-val">{meta.model}</span>
+              </div>
+            )}
+            {meta?.quality && (
+              <div className="preview-kv-row">
+                <span className="preview-kv-key">{t('preview_quality')}</span>
+                <span className="preview-kv-val">{meta.quality}</span>
+              </div>
+            )}
+            {meta?.ratio && (
+              <div className="preview-kv-row">
+                <span className="preview-kv-key">{t('preview_ratio')}</span>
+                <span className="preview-kv-val">{meta.ratio}</span>
+              </div>
+            )}
+            {typeof meta?.durationS === 'number' && (
+              <div className="preview-kv-row">
+                <span className="preview-kv-key">{t('preview_duration')}</span>
+                <span className="preview-kv-val">{meta.durationS}s</span>
+              </div>
+            )}
+            {fileSize != null && (
+              <div className="preview-kv-row">
+                <span className="preview-kv-key">{t('preview_filesize')}</span>
+                <span className="preview-kv-val">{formatBytes(fileSize)}</span>
+              </div>
+            )}
+            {meta?.createdAt && (
+              <div className="preview-kv-row">
+                <span className="preview-kv-key">{t('preview_date')}</span>
+                <span className="preview-kv-val">{formatDate(meta.createdAt)}</span>
+              </div>
+            )}
+            {meta?.creator && (
+              <div className="preview-kv-row">
+                <span className="preview-kv-key">{t('preview_creator')}</span>
+                <span className="preview-kv-val">{meta.creator}</span>
+              </div>
+            )}
+          </div>
+
+          {onDownload && (
+            <button className="preview-download-btn" onClick={onDownload}>
+              <Download size={15} aria-hidden />
+              <span>{t('preview_download')}</span>
+            </button>
+          )}
+        </aside>
       </div>
-      {onNext && (
-        <button className="lightbox-nav lightbox-next" onClick={(e) => { e.stopPropagation(); setZoomed(false); onNext(); }} aria-label="Next">
-          <ChevronRight size={28} aria-hidden />
-        </button>
-      )}
-    </div>
+    </div>,
+    document.body,
   );
 }

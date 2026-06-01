@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { useReactFlow, useStore as useFlowStore } from '@xyflow/react';
 import { Minus, Plus, Map as MapIcon, Maximize2, Wand2 } from 'lucide-react';
 import { usePrefsStore } from './prefsStore';
+import { useT } from '../i18n';
 
 // Per-column horizontal pitch and per-row vertical gap for the auto-layout.
 // Tuned for the typical 280-px-wide node card.
@@ -19,16 +20,33 @@ const START_Y = 80;
 const DEFAULT_NODE_H = 280;
 
 export default function CanvasViewBar() {
-  const { zoomIn, zoomOut, fitView, getNodes, getEdges, setNodes } = useReactFlow();
+  const { zoomIn, zoomOut, zoomTo, fitView, getNodes, getEdges, setNodes } = useReactFlow();
   // Subscribe to viewport zoom so the % updates live as the user pinches.
   const zoom = useFlowStore((s) => s.transform[2]);
   const showMinimap = usePrefsStore((s) => s.showMinimap);
   const toggleMinimap = usePrefsStore((s) => s.toggleMinimap);
+  const t = useT();
 
   // Local mirror just to avoid a re-render storm if `zoom` updates more often
   // than we display (we round to whole percent anyway).
   const [pct, setPct] = useState(Math.round((zoom ?? 1) * 100));
   useEffect(() => { setPct(Math.round((zoom ?? 1) * 100)); }, [zoom]);
+
+  // Zoom-% dropdown (Fit to screen / 50 / 100 / 200).
+  const [zoomMenu, setZoomMenu] = useState(false);
+  const doFit = () => { fitView({ padding: 0.2, duration: 300 }); setZoomMenu(false); };
+  const setZoom = (z: number) => { zoomTo(z, { duration: 200 }); setZoomMenu(false); };
+
+  // Shift+1 fits the view (the menu shows this hint), but not while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (e.shiftKey && (e.key === '1' || e.key === '!')) { e.preventDefault(); fitView({ padding: 0.2, duration: 300 }); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fitView]);
 
   // ── Auto-arrange: column-by-depth left-to-right layout ──
   // Build incoming-edge counts, BFS from sources to assign each node a
@@ -131,7 +149,39 @@ export default function CanvasViewBar() {
       >
         <Minus size={15} strokeWidth={2} aria-hidden />
       </button>
-      <span className="view-bar-pct" aria-live="polite">{pct}%</span>
+      <div className="view-bar-zoom-wrap">
+        <button
+          type="button"
+          className="view-bar-pct"
+          onClick={() => setZoomMenu((v) => !v)}
+          title="Zoom"
+          aria-haspopup="menu"
+          aria-expanded={zoomMenu}
+        >
+          {pct}%
+        </button>
+        {zoomMenu && (
+          <>
+            <div className="view-bar-zoom-backdrop" onClick={() => setZoomMenu(false)} />
+            <div className="view-bar-zoom-menu" role="menu">
+              <button className="zoom-menu-item" role="menuitem" onClick={doFit}>
+                <span>{t('vb_fit')}</span>
+                <kbd className="zoom-menu-kbd">⇧1</kbd>
+              </button>
+              <span className="zoom-menu-divider" />
+              <button className="zoom-menu-item" role="menuitem" onClick={() => setZoom(0.5)}>
+                {t('vb_zoom_to', { pct: 50 })}
+              </button>
+              <button className="zoom-menu-item" role="menuitem" onClick={() => setZoom(1)}>
+                {t('vb_zoom_to', { pct: 100 })}
+              </button>
+              <button className="zoom-menu-item" role="menuitem" onClick={() => setZoom(2)}>
+                {t('vb_zoom_to', { pct: 200 })}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
       <button
         type="button"
         className="view-bar-btn"

@@ -8,6 +8,7 @@ import NodeFrame from './NodeFrame';
 import NodeActionMenu from './NodeActionMenu';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
 import LyricsPanel, { type LyricsMode } from './LyricsPanel';
+import ModelDropdown from '../components/ModelDropdown';
 import Lightbox from './Lightbox';
 import { useCanvasCtx } from './CanvasContext';
 
@@ -200,6 +201,7 @@ export function UploadNode({ data, id }: NodeProps) {
     reader.onload = () => {
       d.imageUrl = reader.result as string;
       d.status = 'done';
+      d.createdAt = Date.now();
       force((n) => n + 1);
     };
     reader.readAsDataURL(file);
@@ -216,6 +218,7 @@ export function UploadNode({ data, id }: NodeProps) {
         icon={Upload}
         status={d.status}
         hasResult={!!d.imageUrl}
+        saveItem={d.imageUrl ? { kind: 'image', url: d.imageUrl, title: d.title } : null}
         onDownload={() => d.imageUrl && void downloadUrl(d.imageUrl, `${d.title || id}.png`)}
         onExpand={() => d.imageUrl && setUploadLightbox(true)}
       >
@@ -245,7 +248,13 @@ export function UploadNode({ data, id }: NodeProps) {
       <AddSideButton id={id} side="right" />
       <Handle type="source" position={Position.Right} id={`${id}-out`} />
       {uploadLightbox && d.imageUrl && (
-        <Lightbox src={d.imageUrl} kind="image" onClose={() => setUploadLightbox(false)} />
+        <Lightbox
+          src={d.imageUrl}
+          kind="image"
+          onClose={() => setUploadLightbox(false)}
+          meta={{ createdAt: d.createdAt as number | undefined }}
+          onDownload={() => void downloadUrl(d.imageUrl!, `${d.title || id}.png`)}
+        />
       )}
     </div>
   );
@@ -287,6 +296,7 @@ export function ImageGenNode({ data, id }: NodeProps) {
         icon={ImageIcon}
         status={d.status}
         hasResult={!!d.resultUrl}
+        saveItem={d.resultUrl ? { kind: 'image', url: d.resultUrl, title: d.title, model: IMAGE_MODELS.find((m) => m.id === d.model)?.label ?? d.model, prompt: d.prompt } : null}
         onDownload={() => d.resultUrl && void downloadUrl(d.resultUrl, `${d.title || id}.png`)}
         onExpand={() => d.resultUrl && setLightboxSrc(d.resultUrl as string)}
         onMore={() => setMenuOpen((v) => !v)}
@@ -374,6 +384,12 @@ export function ImageGenNode({ data, id }: NodeProps) {
           onClose={() => setLightboxSrc(null)}
           onPrev={() => navLightbox(-1)}
           onNext={() => navLightbox(1)}
+          meta={{
+            prompt: d.prompt,
+            model: IMAGE_MODELS.find((m) => m.id === d.model)?.label ?? d.model,
+            createdAt: d.createdAt as number | undefined,
+          }}
+          onDownload={() => void downloadUrl(lightboxSrc, `${d.title || id}.png`)}
         />
       )}
     </div>
@@ -437,9 +453,8 @@ function VideoCard({
         preload="metadata"
         playsInline
         crossOrigin="anonymous"
-        className="media-fill media-video nodrag"
+        className="media-fill media-video"
         data-testid="canvas-node-video-content"
-        onPointerDown={(e) => e.stopPropagation()}
       />
     </div>
   );
@@ -479,6 +494,7 @@ export function VideoGenNode({ data, id }: NodeProps) {
         icon={Film}
         status={d.status}
         hasResult={!!d.resultUrl}
+        saveItem={d.resultUrl ? { kind: 'video', url: d.resultUrl, title: d.title, model: VIDEO_MODELS.find((m) => m.id === d.model)?.label ?? d.model, prompt: d.prompt } : null}
         onDownload={() => d.resultUrl && void downloadUrl(d.resultUrl, `${d.title || id}.mp4`)}
         onExpand={() => d.resultUrl && setLightboxSrc(d.resultUrl as string)}
         onMore={() => setSettingsOpen((v) => !v)}
@@ -512,6 +528,15 @@ export function VideoGenNode({ data, id }: NodeProps) {
           onClose={() => setLightboxSrc(null)}
           onPrev={() => navLightbox(-1)}
           onNext={() => navLightbox(1)}
+          meta={{
+            prompt: d.prompt,
+            model: VIDEO_MODELS.find((m) => m.id === d.model)?.label ?? d.model,
+            quality: settings.resolution,
+            ratio: settings.ratio,
+            durationS: settings.durationS,
+            createdAt: d.createdAt as number | undefined,
+          }}
+          onDownload={() => void downloadUrl(lightboxSrc, `${d.title || id}.mp4`)}
         />
       )}
     </div>
@@ -548,6 +573,7 @@ export function MusicGenNode({ data, id }: NodeProps) {
         icon={Music}
         status={d.status}
         hasResult={!!d.resultUrl}
+        saveItem={d.resultUrl ? { kind: 'audio', url: d.resultUrl, title: d.title, model: MUSIC_MODELS.find((m) => m.id === d.model)?.label ?? d.model, prompt: d.prompt } : null}
         onDownload={() => d.resultUrl && void downloadUrl(d.resultUrl, `${d.title || id}.mp3`)}
         onExpand={() => d.resultUrl && setLightboxSrc(d.resultUrl as string)}
         onMore={() => setLyricsOpen((v) => !v)}
@@ -594,6 +620,12 @@ export function MusicGenNode({ data, id }: NodeProps) {
           onClose={() => setLightboxSrc(null)}
           onPrev={() => navLightbox(-1)}
           onNext={() => navLightbox(1)}
+          meta={{
+            prompt: d.prompt,
+            model: MUSIC_MODELS.find((m) => m.id === d.model)?.label ?? d.model,
+            createdAt: d.createdAt as number | undefined,
+          }}
+          onDownload={() => void downloadUrl(lightboxSrc, `${d.title || id}.mp3`)}
         />
       )}
     </div>
@@ -614,11 +646,13 @@ export function TextNode({ data, id }: NodeProps) {
       <Handle type="target" position={Position.Left} id={`${id}-in`} />
       <NodeHeader icon={Type} title="Text / LLM" status={d.status ?? 'idle'} />
       <div className="node-body">
-        <select className="node-model" value={d.model ?? TEXT_MODELS[0].id} onChange={(e) => { d.model = e.target.value; force((n) => n + 1); }} aria-label="Text model">
-          {TEXT_MODELS.map((m) => (
-            <option key={m.id} value={m.id}>{m.label} · ${m.priceK.toFixed(4)}/1k</option>
-          ))}
-        </select>
+        <ModelDropdown
+          className="node-model-dd nodrag"
+          placement="down"
+          models={TEXT_MODELS.map((m) => ({ id: m.id, label: `${m.label} · $${m.priceK.toFixed(4)}/1k` }))}
+          value={d.model ?? TEXT_MODELS[0].id}
+          onChange={(id) => { d.model = id; force((n) => n + 1); }}
+        />
         <textarea
           className="node-prompt"
           value={prompt}
@@ -740,7 +774,7 @@ export function TimelineNode({ data, id }: NodeProps) {
         </div>
 
         <div
-          className="timeline-track nodrag"
+          className="timeline-track"
           style={{ width: trackWidthPx + 24 }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -762,7 +796,7 @@ export function TimelineNode({ data, id }: NodeProps) {
               <div className="timeline-empty-pop">
                 <button
                   type="button"
-                  className="timeline-empty-plus"
+                  className="timeline-empty-plus nodrag"
                   onClick={() => setPickerOpen((v) => !v)}
                   aria-label="Add a clip"
                 >
@@ -790,7 +824,7 @@ export function TimelineNode({ data, id }: NodeProps) {
                   </div>
                   <button
                     type="button"
-                    className="timeline-block-x"
+                    className="timeline-block-x nodrag"
                     aria-label="Remove clip"
                     onClick={() => removeClip(i)}
                   >
@@ -805,7 +839,7 @@ export function TimelineNode({ data, id }: NodeProps) {
             <div className="timeline-add-floating">
               <button
                 type="button"
-                className="timeline-add"
+                className="timeline-add nodrag"
                 aria-label="Add clip"
                 onClick={() => setPickerOpen((v) => !v)}
               >

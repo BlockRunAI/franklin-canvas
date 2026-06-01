@@ -21,7 +21,9 @@ import { NODE_TYPES, NODE_CATALOG, CATEGORY_TITLES, IMAGE_MODELS, VIDEO_MODELS, 
 import { EDGE_TYPES } from '../canvas/edges';
 import PromptBar from '../canvas/PromptBar';
 import PromptLibrary from '../canvas/PromptLibrary';
+import CollectionsPanel from '../canvas/CollectionsPanel';
 import AnnotateModal from '../canvas/AnnotateModal';
+import { type FavItem } from '../collectionsStore';
 import CanvasViewBar from '../canvas/CanvasViewBar';
 import { usePrefsStore } from '../canvas/prefsStore';
 import { CanvasContext, type ImageEditOp } from '../canvas/CanvasContext';
@@ -159,6 +161,8 @@ function CanvasInner() {
   const [projectName, setProjectName] = useState(project.name);
   const promptLibOpen = useUiStore((s) => s.promptLibOpen);
   const setPromptLibOpen = useUiStore((s) => s.setPromptLibOpen);
+  const collectionsOpen = useUiStore((s) => s.collectionsOpen);
+  const setCollectionsOpen = useUiStore((s) => s.setCollectionsOpen);
   const theme = useThemeStore((s) => s.theme);
   const showMinimap = usePrefsStore((s) => s.showMinimap);
   const showDots = usePrefsStore((s) => s.showDots);
@@ -392,6 +396,22 @@ function CanvasInner() {
     setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode]);
   };
 
+  // Import a saved favorite back onto the canvas as a finished node: image →
+  // upload node (reusable as a reference), video → videogen, audio → musicgen,
+  // each pre-filled with the saved result so it shows immediately.
+  const importFavorite = (item: FavItem) => {
+    const type = item.kind === 'image' ? 'upload' : item.kind === 'video' ? 'videogen' : 'musicgen';
+    const id = `n${idCounter.current++}`;
+    const x = 380 + Math.random() * 200;
+    const y = 200 + Math.random() * 150;
+    const data = item.kind === 'image'
+      ? { label: 'saved', title: item.title, imageUrl: item.url, status: 'done' as NodeStatus }
+      : { label: 'saved', title: item.title, resultUrl: item.url, prompt: item.prompt, priceUsd: 0, status: 'done' as NodeStatus };
+    const newNode: Node = { id, type, position: { x, y }, data, selected: true };
+    setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode]);
+    setCollectionsOpen(false);
+  };
+
   // Normalize a reference image into a downscaled JPEG data: URI for the
   // gateway. References arrive as data: URIs (uploads), relative URLs
   // (/api/generated/… for generated images), or http(s) URLs. The gateway
@@ -488,7 +508,7 @@ function CanvasInner() {
       if (post === 'cutout-alpha' && finalUrl) {
         try { finalUrl = await whiteBgToTransparent(finalUrl); } catch { /* keep original */ }
       }
-      setNodeStatus(id, 'done', { resultUrl: finalUrl, progress: 1 });
+      setNodeStatus(id, 'done', { resultUrl: finalUrl, progress: 1, createdAt: Date.now() });
     } else {
       setNodeStatus(id, 'error', {
         progress: 0,
@@ -853,6 +873,7 @@ function CanvasInner() {
       </div>
       </CanvasContext.Provider>
       <PromptLibrary open={promptLibOpen} onClose={() => setPromptLibOpen(false)} onUse={usePromptFromLibrary} />
+      <CollectionsPanel open={collectionsOpen} onClose={() => setCollectionsOpen(false)} onUse={importFavorite} />
       <AnnotateModal
         open={!!annotateSrc}
         imageUrl={annotateSrc?.url ?? null}

@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { createElement, useState, type ReactNode } from 'react';
 import type { NodeStatus } from './nodes';
+import SaveToCollectionMenu, { type SaveItem } from './SaveToCollectionMenu';
+import { useCollectionsStore } from '../collectionsStore';
 
 export interface ToolbarItem {
   id: string;
@@ -36,12 +38,14 @@ function buildDefaultRight(opts: {
   onDelete?: () => void;
   onDownload?: () => void;
   onExpand?: () => void;
-  onAddFolder?: () => void;
+  onSave?: () => void;
+  canSave?: boolean;
+  saved?: boolean;
   hasResult?: boolean;
 }): ToolbarItem[] {
   const enabled = !!opts.hasResult;
   return [
-    { id: 'folder',   iconComponent: FolderPlus, label: 'Add to folder — coming soon', disabled: true,         onClick: opts.onAddFolder },
+    { id: 'folder',   iconComponent: FolderPlus, label: opts.canSave ? (opts.saved ? 'Saved — manage collections' : 'Save to collection') : 'Save to collection (no result yet)', disabled: !opts.canSave, dot: opts.saved, onClick: opts.onSave },
     { id: 'download', iconComponent: Download,   label: enabled ? 'Download' : 'Download (no result yet)',     disabled: !enabled, onClick: opts.onDownload },
     { id: 'expand',   iconComponent: Maximize2,  label: enabled ? 'Expand'   : 'Expand (no result yet)',       disabled: !enabled, onClick: opts.onExpand },
     { id: 'delete',   iconComponent: Trash2,     label: 'Delete node',                                          onClick: opts.onDelete },
@@ -63,6 +67,9 @@ interface Props {
   onExpand?: () => void;
   /** Whether a result exists — controls Download/Expand enabled state. */
   hasResult?: boolean;
+  /** The result to save into a collection (image/video/audio + metadata).
+   *  When present, the folder button becomes an active "Save to collection". */
+  saveItem?: SaveItem | null;
   /** Rendered inside NodeToolbar below the pill — used for floating popovers. */
   toolbarExtra?: ReactNode;
   children: ReactNode;
@@ -88,13 +95,19 @@ export default function NodeFrame({
   onDownload,
   onExpand,
   hasResult,
+  saveItem,
   toolbarExtra,
   children,
 }: Props) {
   const { updateNodeData, deleteElements } = useReactFlow();
   const onDelete = () => { void deleteElements({ nodes: [{ id }] }); };
+  const [saveOpen, setSaveOpen] = useState(false);
+  const saved = useCollectionsStore((s) => (saveItem ? s.items.some((it) => it.url === saveItem.url) : false));
   const left = toolbarLeft ?? buildDefaultLeft(onMore);
-  const right = toolbarRight ?? buildDefaultRight({ onDelete, onDownload, onExpand, hasResult });
+  const right = toolbarRight ?? buildDefaultRight({
+    onDelete, onDownload, onExpand, hasResult,
+    canSave: !!saveItem, saved, onSave: () => setSaveOpen((v) => !v),
+  });
 
   // Toolbar visibility: appears on hover OR when the node is selected.
   // Default NodeToolbar behavior only triggers on selected — but users
@@ -168,6 +181,11 @@ export default function NodeFrame({
           ))}
         </ul>
         </div>
+        {saveOpen && saveItem && (
+          <div className="node-toolbar-extra">
+            <SaveToCollectionMenu item={saveItem} onClose={() => setSaveOpen(false)} />
+          </div>
+        )}
         {toolbarExtra && <div className="node-toolbar-extra">{toolbarExtra}</div>}
       </NodeToolbar>
 

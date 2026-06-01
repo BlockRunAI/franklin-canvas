@@ -64,8 +64,10 @@ export interface PromptItem {
   path?: string;
 }
 
-// Prompt library catalog — fetched server-side from the BlockRun case library
+// Prompt library catalog — fetched server-side from the BlockRun Prompt-Case-Hub
 // INDEX. Titles + metadata only; the prompt body comes from getPromptDetail.
+// NOTE: the actual upstream the backend reads from is configured server-side;
+// this frontend only attributes/links to Prompt-Case-Hub.
 export async function listPrompts(): Promise<PromptItem[]> {
   const r = await fetch(`${base}/prompts`);
   if (!r.ok) throw new Error(`prompts ${r.status}`);

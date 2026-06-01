@@ -10,9 +10,13 @@ interface Props {
   models: ModelOption[];
   value: string;
   onChange: (id: string) => void;
+  /** 'up' (default) opens above the button (prompt bar); 'down' below it (node). */
+  placement?: 'up' | 'down';
+  /** Extra classes on the root — e.g. `nodrag` inside a React Flow node. */
+  className?: string;
 }
 
-export default function ModelDropdown({ models, value, onChange }: Props) {
+export default function ModelDropdown({ models, value, onChange, placement = 'up', className = '' }: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const current = models.find((m) => m.id === value) ?? models[0];
@@ -29,7 +33,7 @@ export default function ModelDropdown({ models, value, onChange }: Props) {
   }, [open]);
 
   return (
-    <div className="model-dropdown" ref={rootRef}>
+    <div className={`model-dropdown ${className}`} ref={rootRef}>
       <button
         type="button"
         className="model-dropdown-btn"
@@ -42,7 +46,7 @@ export default function ModelDropdown({ models, value, onChange }: Props) {
         <ChevronDown size={14} strokeWidth={2.2} className="model-dropdown-chevron" aria-hidden />
       </button>
       {open && (
-        <ul className="model-dropdown-menu" role="listbox">
+        <ul className={`model-dropdown-menu ${placement === 'down' ? 'is-down' : ''}`} role="listbox">
           {models.map((m) => (
             <li key={m.id}>
               <button

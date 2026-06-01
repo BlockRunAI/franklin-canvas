@@ -287,52 +287,46 @@ async function generateVideo(body, jobId) {
 }
 
 // ── Prompt library ──
-// Sourced from BlockRun's curated case library, which aggregates several
-// public prompt repos into ~848 normalized cases (one markdown file each with
-// frontmatter: title / workflow / model / tags + an "## Original prompt").
+// Sourced from BlockRun's Prompt-Case-Hub, which aggregates several public prompt
+// repos into ~848 cases in one unified format (each case = one markdown file with
+// YAML front-matter + a fenced ```prompt body; see the hub's FORMAT.md).
 //
-// The catalog (titles + metadata) lives in a single INDEX.md, fetched once.
-// The full prompt body for a case is fetched on demand (when the user clicks
-// "Use") so we never pull 848 files up front.
-const CASE_LIB_BASE = 'https://raw.githubusercontent.com/BlockRunAI/Claude-Code-GPT-IMAGE2-SeeDance-BlockRun/main/prompts/case-library';
+// The catalog (titles + metadata) lives in cases/index.json, fetched once. The
+// full prompt body for a case is fetched on demand (when the user clicks "Use")
+// so we never pull 848 files up front.
+const CASE_LIB_BASE = 'https://raw.githubusercontent.com/BlockRunAI/Prompt-Case-Hub/main';
 const PROMPT_TTL_MS = 6 * 60 * 60 * 1000; // 6h
 let promptCache = { at: 0, items: [] };
 
-// Parse INDEX.md lines like:
-//   - [Title](from-repo/123.md) — image2image · openai/gpt-image-2 [tag1, tag2]
-function parseIndex(md) {
-  const items = [];
-  const re = /^\s*-\s*\[(.+?)\]\((from-[^)]+\.md)\)\s*—\s*(\S+)\s*·\s*(\S+)\s*(?:\[(.*?)\])?/gm;
-  let m;
-  while ((m = re.exec(md))) {
-    const [, title, path, workflow, model, tagStr] = m;
-    const tags = (tagStr || '').split(',').map((t) => t.trim()).filter(Boolean);
-    items.push({
-      id: path,
-      title: title.trim(),
-      titleCn: '',
-      category: tags[0] || workflow,
-      workflow,
-      model,
-      tags,
-      prompt: '',            // filled on demand via /api/prompts/detail
-      image: '',
-      path,
-      needsRef: workflow === 'image2image' || workflow === 'image2video',
-      source: 'blockrun-case-library',
-    });
-  }
-  return items;
+// Map a Prompt-Case-Hub index.json entry → the PromptItem shape the frontend
+// expects. The index is denormalized (modality/workflow/reference_images/model/
+// preview) so we can build the whole catalog without fetching any case body.
+function indexEntryToItem(c) {
+  const tags = Array.isArray(c.tags) ? c.tags : [];
+  return {
+    id: c.id,
+    title: c.title,
+    titleCn: '',
+    category: tags[0] || c.workflow,
+    workflow: c.workflow,
+    model: c.model || '',
+    tags,
+    prompt: '',              // filled on demand via /api/prompts/detail
+    image: c.preview || '',
+    path: c.file,            // e.g. "cases/awesome-gpt-image-2-4.md"
+    needsRef: (c.reference_images || 0) > 0,
+    source: 'prompt-case-hub',
+  };
 }
 
 async function getPromptLibrary() {
   if (promptCache.items.length && Date.now() - promptCache.at < PROMPT_TTL_MS) {
     return promptCache.items;
   }
-  const r = await fetch(`${CASE_LIB_BASE}/INDEX.md`, { headers: { 'user-agent': 'franklin-canvas' } });
+  const r = await fetch(`${CASE_LIB_BASE}/cases/index.json`, { headers: { 'user-agent': 'franklin-canvas' } });
   if (!r.ok) return promptCache.items;
-  const md = await r.text();
-  const items = parseIndex(md);
+  const data = await r.json();
+  const items = (data.cases || []).map(indexEntryToItem);
   if (items.length) promptCache = { at: Date.now(), items };
   return items;
 }
@@ -348,45 +342,37 @@ function resolveArguments(text) {
   return out;
 }
 
-// Fetch + parse a single case file: pull the prompt body and a preview image.
+// Fetch + parse a single unified-format case file: pull the fenced `prompt`
+// body and a preview image. Files live under cases/ in Prompt-Case-Hub.
 async function getPromptDetail(relPath) {
-  if (!relPath || relPath.includes('..') || !relPath.startsWith('from-')) {
+  if (!relPath || relPath.includes('..') || !relPath.startsWith('cases/') || !relPath.endsWith('.md')) {
     throw new Error('bad path');
   }
   const r = await fetch(`${CASE_LIB_BASE}/${relPath}`, { headers: { 'user-agent': 'franklin-canvas' } });
   if (!r.ok) throw new Error(`case ${r.status}`);
   const raw = await r.text();
-  // Split frontmatter (between the first pair of --- lines) from the body.
-  let body = raw;
-  let fmImage = '';
+  // Front-matter: title + preview image.
   let title = '';
-  const fm = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  let image = '';
+  const fm = raw.match(/^---\n([\s\S]*?)\n---\n/);
   if (fm) {
-    body = fm[2];
     const t = fm[1].match(/^title:\s*"?(.+?)"?\s*$/m);
     if (t) title = t[1];
-    const u = fm[1].match(/url:\s*"?(https?:\/\/[^"\s]+)"?/);
-    if (u) fmImage = u[1];
+    const pv = fm[1].match(/^preview:\s*"?(https?:\/\/[^"\s]+)"?/m);
+    if (pv) image = pv[1];
   }
-  // Image: prefer a markdown image in the body, else the frontmatter asset.
-  const imgM = body.match(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/);
-  const image = imgM ? imgM[1] : fmImage;
-  // Prompt: the text after "## Original prompt" / "## Prompt", else the body
-  // with images/headings stripped.
-  let prompt = '';
-  const ph = body.split(/##\s*(?:Original\s+prompt|Prompt|提示词)\s*\n/i);
-  let seg = ph.length > 1 ? ph[1] : body;
-  // The prompt ends at the next section heading (e.g. "## Run via Claude Code",
-  // "## Credit & license") — cut there so the footer/attribution isn't included.
-  seg = seg.split(/\n#{2,4}\s/)[0];
-  prompt = seg
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')   // drop images
-    .replace(/^#+\s.*$/gm, '')               // drop headings
-    .replace(/```[a-z]*\n?/gi, '')           // unwrap fenced blocks
-    .trim();
-  // Resolve template placeholders {argument name="x" default="y"} → "y" so the
-  // prompt reads as plain text instead of showing the raw template/JSON.
-  prompt = resolveArguments(prompt);
+  if (!image) {
+    const imgM = raw.match(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/);
+    if (imgM) image = imgM[1];
+  }
+  // Prompt: the fenced ```prompt block. The fence can be 3+ backticks (longer
+  // when the prompt itself contains ```), so capture the opening run and match
+  // the same run as the close.
+  const pm = raw.match(/^(`{3,})prompt[ \t]*\n([\s\S]*?)\n\1[ \t]*$/m);
+  let prompt = pm ? pm[2] : '';
+  // Resolve any residual {argument name="x" default="y"} → "y" (cases are
+  // pre-resolved at migration, but keep this defensive for new imports).
+  prompt = resolveArguments(prompt).trim();
   return { title, prompt, image };
 }
 

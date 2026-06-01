@@ -5,10 +5,11 @@
 
 import {
   Workflow, LayoutGrid, Wallet as WalletIcon, Settings, Sparkles,
-  PanelLeftClose, PanelLeftOpen,
+  LibraryBig, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import type { Route } from '../types';
 import { useT, type StringKey } from '../i18n';
+import { useUiStore } from '../uiStore';
 
 type SettingsSection = 'wallet' | 'models' | 'canvas' | 'about';
 
@@ -28,6 +29,7 @@ interface Props {
 
 export default function Sidebar({ route, collapsed = false, onNavigate, onToggleCollapse, onOpenSettings }: Props) {
   const t = useT();
+  const openCollections = useUiStore((s) => s.setCollectionsOpen);
   return (
     <nav
       className={`sidebar ${collapsed ? 'is-collapsed' : ''}`}
@@ -68,6 +70,16 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
             </li>
           );
         })}
+        <li>
+          <button
+            className="nav-item"
+            onClick={() => { onNavigate('canvas'); openCollections(true); }}
+            title={collapsed ? t('sidebar_library') : undefined}
+          >
+            <LibraryBig size={16} strokeWidth={1.75} aria-hidden />
+            <span>{t('sidebar_library')}</span>
+          </button>
+        </li>
       </ul>
       <div className="sidebar-footer">
         <button
