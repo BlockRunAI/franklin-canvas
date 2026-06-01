@@ -1837,8 +1837,19 @@ button:active:not(:disabled) { transform: scale(0.97); }
   background: rgba(7,7,10,0.92);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
+/* While the Lightbox is open, suppress every floating chrome element that
+   the underlying canvas would otherwise punch through the overlay with —
+   not just the React Flow NodeToolbar portal (which lives outside the
+   .react-flow tree) but also the per-node corner-delete X, the side +
+   handles, the action menu, and the connect menu. */
 body.is-previewing .react-flow .node-toolbar-pill,
-body.is-previewing .react-flow__node-toolbar { display: none !important; }
+body.is-previewing .react-flow__node-toolbar,
+body.is-previewing .node-corner-delete,
+body.is-previewing .node-add-side,
+body.is-previewing .action-menu,
+body.is-previewing .connect-menu,
+body.is-previewing .video-settings-panel,
+body.is-previewing .lyrics-panel { display: none !important; }
 
 .lightbox-stage {
   width: 100vw; height: 100vh;
@@ -1855,11 +1866,13 @@ body.is-previewing .react-flow__node-toolbar { display: none !important; }
 .lightbox-close {
   position: absolute; top: 20px; right: 24px;
   width: 40px; height: 40px; border-radius: 50%; border: 0;
-  background: rgba(255,255,255,0.10); color: #fff;
+  background: rgba(0,0,0,0.45); color: #fff;
   display: inline-flex; align-items: center; justify-content: center;
   cursor: pointer; backdrop-filter: blur(8px);
+  opacity: 0.55; transition: opacity 0.18s ease, background 0.18s ease;
 }
-.lightbox-close:hover { background: rgba(255,255,255,0.18); }
+.lightbox-overlay:hover .lightbox-close { opacity: 1; }
+.lightbox-close:hover { background: rgba(0,0,0,0.7); }
 .lightbox-zoom-badge {
   position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
   padding: 5px 12px; border-radius: 999px;
@@ -1867,14 +1880,20 @@ body.is-previewing .react-flow__node-toolbar { display: none !important; }
   font-variant-numeric: tabular-nums; backdrop-filter: blur(8px);
   pointer-events: none;
 }
+/* Nav arrows: fade them out when idle so they don't sit visually on top of
+   the video / image. Pop back in on hover so they're still reachable.
+   The whole overlay is a hover surface, so any cursor movement reveals
+   them. */
 .lightbox-nav {
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 48px; height: 48px; border-radius: 50%; border: 0;
-  background: rgba(255,255,255,0.10); color: #fff;
+  background: rgba(0,0,0,0.45); color: #fff;
   display: inline-flex; align-items: center; justify-content: center;
   cursor: pointer; backdrop-filter: blur(8px);
+  opacity: 0.25; transition: opacity 0.18s ease, background 0.18s ease, transform 0.18s ease;
 }
-.lightbox-nav:hover { background: rgba(255,255,255,0.18); }
+.lightbox-overlay:hover .lightbox-nav { opacity: 1; }
+.lightbox-nav:hover { background: rgba(0,0,0,0.7); transform: translateY(-50%) scale(1.08); }
 .lightbox-prev { left: 24px; }
 .lightbox-next { right: 24px; }
 
