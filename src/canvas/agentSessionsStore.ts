@@ -47,6 +47,29 @@ export const useAgentSessions = create<AgentSessionsState>()(
         }),
       remove: (id) => set((st) => ({ sessions: st.sessions.filter((x) => x.id !== id) })),
     }),
-    { name: 'franklin-canvas:agent-sessions' },
+    {
+      name: 'franklin-canvas:agent-sessions',
+      // v2 switched sessions from {bubbles, steps} (one-shot planner) to
+      // {trace, turns} (tool-calling loop). Migrate old records so loading
+      // history doesn't crash on a missing `trace`.
+      version: 2,
+      migrate: (state, version) => {
+        const st = state as { sessions?: unknown[] } | undefined;
+        const raw = Array.isArray(st?.sessions) ? st!.sessions : [];
+        const sessions: AgentSession[] = raw.map((x) => {
+          const s = x as Record<string, unknown>;
+          if (Array.isArray(s.trace)) return s as unknown as AgentSession;
+          const bubbles = Array.isArray(s.bubbles) ? (s.bubbles as Record<string, unknown>[]) : [];
+          const trace: TraceItem[] = bubbles.map((b, i) => ({
+            id: Number(b.id ?? i),
+            kind: b.role === 'user' ? 'user' : 'agent',
+            text: String(b.text ?? ''),
+          }));
+          return { id: String(s.id ?? ''), title: String(s.title ?? 'Chat'), trace, turns: [], updatedAt: Number(s.updatedAt ?? 0) };
+        }).filter((s) => s.id);
+        void version;
+        return { sessions };
+      },
+    },
   ),
 );

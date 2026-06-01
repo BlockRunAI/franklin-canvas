@@ -6,7 +6,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Search, Copy, Check, Sparkles, Wand2, Loader2, ImageIcon, ExternalLink } from 'lucide-react';
-import { listPrompts, getPromptDetail, type PromptItem } from '../api/franklin';
+import { listPrompts, getPromptDetail, translateTexts, type PromptItem } from '../api/franklin';
+
+// Persisted across opens: title → English translation (so each title is only
+// ever translated once, even across sessions).
+const TRANS_KEY = 'franklin-canvas:title-en-v2';
+function loadTrans(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(TRANS_KEY) || '{}'); } catch { return {}; }
+}
 
 interface Props {
   open: boolean;
@@ -21,8 +28,8 @@ interface Props {
 const detailCache = new Map<string, { prompt: string; image?: string }>();
 
 function PromptCard({
-  item, onUse, onClose,
-}: { item: PromptItem; onUse: (p: string, workflow?: string) => void; onClose: () => void }) {
+  item, onUse, onClose, displayTitle,
+}: { item: PromptItem; onUse: (p: string, workflow?: string) => void; onClose: () => void; displayTitle?: string }) {
   const ref = useRef<HTMLLIElement>(null);
   const [detail, setDetail] = useState<{ prompt: string; image?: string } | null>(
     item.path ? detailCache.get(item.path) ?? null : { prompt: item.prompt, image: item.image },
@@ -80,7 +87,7 @@ function PromptCard({
           : <div className="prompt-card-cover-ph"><ImageIcon size={22} strokeWidth={1.4} aria-hidden /></div>}
       </div>
       <div className="prompt-card-body">
-        <div className="prompt-card-title" title={item.title}>{item.title}</div>
+        <div className="prompt-card-title" title={displayTitle ?? item.title}>{displayTitle ?? item.title}</div>
         {detail
           ? <div className="prompt-card-text">{detail.prompt || '—'}</div>
           : <div className="prompt-card-text prompt-card-text-loading">Loading…</div>}
@@ -118,6 +125,9 @@ export default function PromptLibrary({ open, onClose, onUse }: Props) {
   const [q, setQ] = useState('');
   const [workflow, setWorkflow] = useState<Workflow>('all');
   const [tag, setTag] = useState<string>('all');
+  // 中/EN title localization (for English demos). Translations are cached.
+  const [lang, setLang] = useState<'zh' | 'en'>('zh');
+  const [trans, setTrans] = useState<Record<string, string>>(loadTrans);
 
   useEffect(() => {
     if (!open || items) return;
@@ -162,6 +172,35 @@ export default function PromptLibrary({ open, onClose, onUse }: Props) {
     }).slice(0, 120); // render cap; lazy loading means only visible cards fetch
   }, [items, q, workflow, tag]);
 
+  // When EN is on, translate any visible titles we haven't cached yet. Split
+  // into small chunks fired IN PARALLEL so results stream in fast (total time ≈
+  // one chunk, not one big serial generation). `requested` dedupes in-flight
+  // titles so the trans-state update doesn't re-fire them; failed chunks are
+  // released so they can retry. Each success is persisted (free next time).
+  const requested = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (lang !== 'en' || !filtered.length) return;
+    const missing = [...new Set(filtered.map((it) => it.title))].filter((t) => !(t in trans) && !requested.current.has(t));
+    if (!missing.length) return;
+    let cancelled = false;
+    const CHUNK = 20;
+    for (let i = 0; i < missing.length; i += CHUNK) {
+      const chunk = missing.slice(i, i + CHUNK);
+      chunk.forEach((t) => requested.current.add(t));
+      translateTexts(chunk, 'en').then((out) => {
+        if (cancelled) return;
+        if (!out) { chunk.forEach((t) => requested.current.delete(t)); return; } // release → allow retry
+        setTrans((prev) => {
+          const next = { ...prev };
+          chunk.forEach((src, j) => { next[src] = out[j] || src; });
+          try { localStorage.setItem(TRANS_KEY, JSON.stringify(next)); } catch { /* quota */ }
+          return next;
+        });
+      });
+    }
+    return () => { cancelled = true; };
+  }, [lang, filtered, trans]);
+
   if (!open) return null;
 
   return (
@@ -173,7 +212,13 @@ export default function PromptLibrary({ open, onClose, onUse }: Props) {
             <Search size={14} aria-hidden />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search prompts…" aria-label="Search prompts" />
           </div>
-          <button className="settings-close" onClick={onClose} aria-label="Close"><X size={16} aria-hidden /></button>
+          <div className="prompt-lib-head-actions">
+            <div className="prompt-lib-lang" role="group" aria-label="Title language">
+              <button className={lang === 'zh' ? 'is-active' : ''} onClick={() => setLang('zh')}>中</button>
+              <button className={lang === 'en' ? 'is-active' : ''} onClick={() => setLang('en')}>EN</button>
+            </div>
+            <button className="settings-close" onClick={onClose} aria-label="Close"><X size={16} aria-hidden /></button>
+          </div>
         </header>
 
         {/* Row 1 — workflow (the "what am I trying to do") */}
@@ -211,7 +256,7 @@ export default function PromptLibrary({ open, onClose, onUse }: Props) {
           ) : (
             <ul className="prompt-grid">
               {filtered.map((it) => (
-                <PromptCard key={it.id} item={it} onUse={onUse} onClose={onClose} />
+                <PromptCard key={it.id} item={it} onUse={onUse} onClose={onClose} displayTitle={lang === 'en' ? (trans[it.title] ?? it.title) : undefined} />
               ))}
             </ul>
           )}

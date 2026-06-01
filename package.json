@@ -1,6 +1,6 @@
 {
   "name": "@blockrun/franklin-canvas",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Franklin Canvas — node-based AI media studio (image, video, music) with x402 wallet payments via the BlockRun gateway",
   "type": "module",
   "license": "Apache-2.0",

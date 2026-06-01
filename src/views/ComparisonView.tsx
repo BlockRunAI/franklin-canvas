@@ -5,10 +5,10 @@
 // Each model call is a real x402 USDC video generation, so the composer shows
 // the total cost and asks for confirmation before spending.
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Pause, RotateCcw, Loader2, Film, Download, Wand2, X, Check, AlertTriangle, Sparkles, LayoutGrid, RectangleHorizontal, RectangleVertical, RefreshCw, Save, FolderOpen, Trash2 } from 'lucide-react';
 import { VIDEO_MODELS } from '../canvas/nodes';
-import { generate, stitchComparison, type StitchItem, type StitchMode, type StitchOrientation } from '../api/franklin';
+import { generate, stitchComparison, type StitchItem, type StitchMode, type StitchOrientation, type LabelPos } from '../api/franklin';
 import { useComparisonsStore } from '../comparisonsStore';
 import PromptLibrary from '../canvas/PromptLibrary';
 
@@ -21,9 +21,10 @@ const DEFAULT_MODELS = VIDEO_MODELS.slice(0, 4).map((m) => m.id);
 
 // Draw a model label to a small transparent PNG (proper fonts via the browser),
 // passed to the backend so ffmpeg can burn it onto each grid cell.
-function renderLabelPng(text: string): string {
+function renderLabelPng(text: string, scale = 1): string {
   // A light, subtle watermark badge — faint pill + slightly translucent text.
-  const fontSize = 19, padX = 11, padY = 7;
+  // `scale` (≈0.6–2) is the user's size slider; everything scales together.
+  const fontSize = 19 * scale, padX = 11 * scale, padY = 7 * scale;
   const font = `600 ${fontSize}px -apple-system, "Segoe UI", Roboto, sans-serif`;
   const measure = document.createElement('canvas').getContext('2d')!;
   measure.font = font;
@@ -35,7 +36,7 @@ function renderLabelPng(text: string): string {
   c.font = font;
   c.textBaseline = 'middle';
   c.fillStyle = 'rgba(10,10,12,0.30)';
-  if (c.roundRect) { c.beginPath(); c.roundRect(0, 0, w, h, 8); c.fill(); }
+  if (c.roundRect) { c.beginPath(); c.roundRect(0, 0, w, h, 8 * scale); c.fill(); }
   else c.fillRect(0, 0, w, h);
   c.fillStyle = 'rgba(255,255,255,0.82)';
   c.fillText(text, padX, h / 2 + 1);
@@ -55,6 +56,25 @@ export default function ComparisonView() {
   const [stitching, setStitching] = useState(false);
   const [orientation, setOrientation] = useState<StitchOrientation>('landscape');
   const [stitchErr, setStitchErr] = useState<string | null>(null);
+
+  // Model watermark: optional, and draggable to any spot in the cell so it
+  // doesn't cover the subject. Position is a fraction of free space per cell.
+  const [watermark, setWatermark] = useState(true);
+  const [labelPos, setLabelPos] = useState<LabelPos>({ x: 0.02, y: 0.03 });
+  const [wmScale, setWmScale] = useState(1);
+  const [wmBoxW, setWmBoxW] = useState(320);
+  const wmBoxRef = useRef<HTMLDivElement>(null);
+  const wmDragging = useRef(false);
+
+  // Track the preview box width so the chip can be sized to the TRUE ratio
+  // (preview ÷ real cell) — what you see is the size that gets burned in.
+  useEffect(() => {
+    const el = wmBoxRef.current;
+    if (!el || !watermark) return;
+    const ro = new ResizeObserver((entries) => setWmBoxW(entries[0].contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [watermark]);
 
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const abortRefs = useRef<(AbortController | null)[]>([]);
@@ -195,12 +215,43 @@ export default function ComparisonView() {
     const items: StitchItem[] = doneJobs.map((j) => ({
       url: j.resultUrl!,
       label: j.label,
-      labelPng: renderLabelPng(j.label),
+      // Only burn the model badge when the watermark toggle is on.
+      labelPng: watermark ? renderLabelPng(j.label, wmScale) : undefined,
     }));
-    const res = await stitchComparison(items, mode, orientation);
+    const res = await stitchComparison(items, mode, orientation, labelPos);
     if (res.ok) setCombinedUrl(res.resultUrl);
     else setStitchErr(res.error);
     setStitching(false);
+  };
+
+  // Drag the watermark chip inside the preview. px/py = fraction of free space
+  // (chip's own size removed), mirroring ffmpeg's overlay=(W-w)*px:(H-h)*py.
+  const snap = (v: number) => (v < 0.06 ? 0 : v > 0.94 ? 1 : Math.abs(v - 0.5) < 0.05 ? 0.5 : v);
+  const moveWatermark = (clientX: number, clientY: number) => {
+    const box = wmBoxRef.current;
+    if (!box) return;
+    const r = box.getBoundingClientRect();
+    const chip = box.querySelector('.cmp-wm-chip') as HTMLElement | null;
+    const cw = chip?.offsetWidth ?? 60;
+    const ch = chip?.offsetHeight ?? 26;
+    const px = (r.width - cw) > 0 ? (clientX - r.left - cw / 2) / (r.width - cw) : 0;
+    const py = (r.height - ch) > 0 ? (clientY - r.top - ch / 2) / (r.height - ch) : 0;
+    setLabelPos({ x: snap(Math.min(1, Math.max(0, px))), y: snap(Math.min(1, Math.max(0, py))) });
+  };
+
+  // Preview cell mirrors the backend stitch cell (so the badge lands where you
+  // put it): landscape 960×540, portrait 1080×(1920/N).
+  const wmN = Math.max(doneJobs.length, 2);
+  const wmCellW = orientation === 'portrait' ? 1080 : 960;
+  const wmCellH = orientation === 'portrait' ? (Math.round(1920 / wmN) - (Math.round(1920 / wmN) % 2)) : 540;
+  const wmFirstUrl = doneJobs[0]?.resultUrl;
+  // Chip is sized to match the burned PNG: backend renders at 19px*scale on a
+  // wmCellW-wide cell, so the preview (wmBoxW wide) uses 19*scale*(boxW/cellW).
+  const wmRatio = (wmBoxW / wmCellW) * wmScale;
+  const wmChipStyle = {
+    fontSize: `${19 * wmRatio}px`,
+    padding: `${7 * wmRatio}px ${11 * wmRatio}px`,
+    borderRadius: `${8 * wmRatio}px`,
   };
 
   // Columns follow the TOTAL number of tiles (not how many have finished), so
@@ -392,6 +443,43 @@ export default function ComparisonView() {
                       <RectangleVertical size={14} aria-hidden /> Portrait · TikTok
                     </button>
                   </div>
+                </div>
+                <div className="cmp-wm">
+                  <div className="cmp-wm-row">
+                    <label className="cmp-wm-toggle">
+                      <input type="checkbox" checked={watermark} onChange={(e) => setWatermark(e.target.checked)} />
+                      <span>Model watermark</span>
+                    </label>
+                    {watermark && (
+                      <label className="cmp-wm-size">
+                        <span>Size</span>
+                        <input type="range" min={0.6} max={2} step={0.05} value={wmScale} onChange={(e) => setWmScale(Number(e.target.value))} />
+                        <span className="cmp-wm-size-val">{Math.round(wmScale * 100)}%</span>
+                      </label>
+                    )}
+                  </div>
+                  {watermark && (
+                    <>
+                      <div
+                        className="cmp-wm-preview"
+                        ref={wmBoxRef}
+                        style={{ aspectRatio: `${wmCellW} / ${wmCellH}` }}
+                        onPointerDown={(e) => { wmDragging.current = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); moveWatermark(e.clientX, e.clientY); }}
+                        onPointerMove={(e) => { if (wmDragging.current) moveWatermark(e.clientX, e.clientY); }}
+                        onPointerUp={() => { wmDragging.current = false; }}
+                        onPointerCancel={() => { wmDragging.current = false; }}
+                      >
+                        {wmFirstUrl
+                          ? <video className="cmp-wm-bg" src={wmFirstUrl} muted playsInline preload="metadata" />
+                          : <div className="cmp-wm-bg cmp-wm-bg-empty" />}
+                        <div
+                          className="cmp-wm-chip"
+                          style={{ left: `${labelPos.x * 100}%`, top: `${labelPos.y * 100}%`, transform: `translate(${-labelPos.x * 100}%, ${-labelPos.y * 100}%)`, ...wmChipStyle }}
+                        >{doneJobs[0]?.label ?? 'Model'}</div>
+                      </div>
+                      <span className="cmp-wm-hint">Drag the badge to reposition · use the Size slider to scale it.</span>
+                    </>
+                  )}
                 </div>
                 <div className="cmp-stitch-buttons">
                   <button type="button" className="cmp-stitch-btn" onClick={() => stitch('grid')} disabled={stitching}>

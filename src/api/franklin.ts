@@ -311,23 +311,46 @@ export async function describeMedia(imageUrl: string, question?: string): Promis
   }
 }
 
+// Translate a batch of short strings (Prompt Library title localization).
+// Returns null on failure (so callers DON'T cache a failed/identity result —
+// caching the originals would permanently poison the cache and never retry).
+export async function translateTexts(texts: string[], target: 'en' | 'zh' = 'en'): Promise<string[] | null> {
+  if (!texts.length) return [];
+  try {
+    const r = await fetch(`${base}/translate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ texts, target }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false || !Array.isArray(data.translations) || data.translations.length !== texts.length) return null;
+    return data.translations as string[];
+  } catch {
+    return null;
+  }
+}
+
 export interface StitchItem { url: string; label: string; labelPng?: string }
 export type StitchMode = 'grid' | 'sequence';
 export type StitchOrientation = 'landscape' | 'portrait';
+// Watermark position as a fraction of free space per cell: {0,0}=top-left, {1,1}=bottom-right.
+export interface LabelPos { x: number; y: number }
 
 // Composite N comparison videos into one MP4 server-side (ffmpeg).
 //   mode: grid (all play at once) | sequence (one at a time, others frozen)
 //   orientation: landscape (grid) | portrait (stacked top-to-bottom, TikTok)
+//   labelPos: where the model watermark sits in each cell (omit items' labelPng to hide it)
 export async function stitchComparison(
   items: StitchItem[],
   mode: StitchMode = 'grid',
   orientation: StitchOrientation = 'landscape',
+  labelPos?: LabelPos,
 ): Promise<GenerateResult | GenerateError> {
   try {
     const r = await fetch(`${base}/comparison/stitch`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ items, mode, orientation }),
+      body: JSON.stringify({ items, mode, orientation, labelPos }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data?.ok === false) {

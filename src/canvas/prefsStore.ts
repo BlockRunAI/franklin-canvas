@@ -12,7 +12,7 @@ const DOTS_KEY     = 'franklin-canvas:show-dots';
 
 function loadEdgeStyle(): EdgeStyle {
   const v = (() => { try { return localStorage.getItem(EDGE_KEY); } catch { return null; } })();
-  return v === 'solid' || v === 'subtle' || v === 'animated' ? v : 'animated';
+  return v === 'solid' || v === 'subtle' || v === 'animated' ? v : 'solid';
 }
 function loadBool(key: string, fallback: boolean): boolean {
   try {

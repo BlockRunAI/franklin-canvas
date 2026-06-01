@@ -2176,6 +2176,21 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .cmp-orient-label { font-size: 12px; color: var(--fg-dim); }
 .cmp-orient-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--panel-soft); border: 1px solid var(--border); }
 .cmp-orient-seg .cmp-seg-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; }
+/* Model watermark: toggle + size slider + draggable position preview */
+.cmp-wm { display: flex; flex-direction: column; gap: 8px; }
+.cmp-wm-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.cmp-wm-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-dim); cursor: pointer; user-select: none; }
+.cmp-wm-toggle input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.cmp-wm-size { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-dim); }
+.cmp-wm-size input[type="range"] { width: 110px; accent-color: var(--accent); cursor: pointer; }
+.cmp-wm-size-val { font-variant-numeric: tabular-nums; color: var(--fg-faint); min-width: 38px; text-align: right; }
+.cmp-wm-preview { position: relative; width: 340px; max-width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: #0c0c0e; cursor: grab; touch-action: none; }
+.cmp-wm-preview:active { cursor: grabbing; }
+.cmp-wm-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.cmp-wm-bg-empty { background: repeating-linear-gradient(45deg, #141416, #141416 10px, #1a1a1d 10px, #1a1a1d 20px); }
+/* size (font/padding/radius) is set inline so it matches the burned PNG exactly */
+.cmp-wm-chip { position: absolute; background: rgba(10,10,12,0.45); color: rgba(255,255,255,0.92); font-weight: 600; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,0.3); line-height: 1.2; }
+.cmp-wm-hint { font-size: 11px; color: var(--fg-faint); }
 .cmp-stitch-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .cmp-stitch-btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 18px; border: 1px solid var(--panel-border); border-radius: 11px; background: var(--panel-soft); color: var(--fg); font-size: 13.5px; cursor: pointer; }
 .cmp-stitch-btn:hover { background: var(--bg-hover); }
@@ -2293,7 +2308,10 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .agent-tool-status { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; }
 .agent-tool-chev { color: var(--fg-faint); transition: transform 0.15s ease; }
 .agent-tool-chev.is-open { transform: rotate(180deg); }
-.agent-tool-output { margin: 0; padding: 8px 10px 10px; border-top: 1px solid var(--border); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.5; color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow-y: auto; }
+/* No inner max-height/scroll: the panel's native wheel handler scrolls the
+   whole body, so a capped inner box can't be scrolled. Let expanded output
+   grow to full height and rely on the body scroll. */
+.agent-tool-output { margin: 0; padding: 8px 10px 10px; border-top: 1px solid var(--border); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.5; color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; }
 .agent-stop { background: #ef4444 !important; }
 .agent-stop:hover { background: #dc2626 !important; }
 
@@ -2386,6 +2404,12 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .prompt-lib-title svg { color: var(--accent); }
 .prompt-lib-search { flex: 1; display: flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: var(--radius-pill); background: var(--bg-card); border: 1px solid var(--border); color: var(--fg-dim); max-width: 360px; }
 .prompt-lib-search input { flex: 1; border: 0; background: transparent; color: var(--fg); font-size: 13px; outline: none; }
+/* Push the language toggle + close button to the far right of the header */
+.prompt-lib-head-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
+.prompt-lib-lang { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-pill); background: var(--bg-card); border: 1px solid var(--border); }
+.prompt-lib-lang button { min-width: 30px; padding: 4px 9px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--fg-dim); font-size: 12px; font-weight: 600; cursor: pointer; }
+.prompt-lib-lang button:hover { color: var(--fg); }
+.prompt-lib-lang button.is-active { background: var(--accent); color: #0c0c0d; }
 .prompt-lib-cats { display: flex; gap: 6px; padding: 12px 16px; overflow-x: auto; border-bottom: 1px solid var(--border); }
 .prompt-cat { flex-shrink: 0; padding: 5px 12px; font-size: 12px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--bg-card); color: var(--fg-dim); white-space: nowrap; }
 .prompt-cat:hover { color: var(--fg); border-color: var(--border-strong); }

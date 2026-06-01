@@ -436,7 +436,7 @@ function probeHasAudio(file) {
 // mode 'sequence': cells play one at a time in order — the active cell plays
 // while the others hold a frozen frame (first frame before their turn, last
 // frame after) — the classic side-by-side model-comparison reel.
-async function stitchComparison(items, mode = 'grid', orientation = 'landscape') {
+async function stitchComparison(items, mode = 'grid', orientation = 'landscape', labelPos = { x: 0.02, y: 0.03 }) {
   const n = items.length;
   if (n < 2 || n > 5) throw new Error('need 2–5 videos');
   // landscape → grid (2×2 etc); portrait → single column stacked top-to-bottom
@@ -489,6 +489,13 @@ async function stitchComparison(items, mode = 'grid', orientation = 'landscape')
       else labelIdx[i] = -1;
     }
 
+    // Watermark position as a fraction of the free space in each cell: (0,0) =
+    // top-left, (1,1) = bottom-right. ffmpeg's overlay (W-w)*px keeps the label
+    // fully inside the cell at every position. Matches the draggable preview.
+    const px = Math.min(1, Math.max(0, Number(labelPos?.x) || 0));
+    const py = Math.min(1, Math.max(0, Number(labelPos?.y) || 0));
+    const overlayXY = `x='(W-w)*${px.toFixed(4)}':y='(H-h)*${py.toFixed(4)}'`;
+
     const fit = `scale=${cellW}:${cellH}:force_original_aspect_ratio=decrease,pad=${cellW}:${cellH}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
     // Per-cell: fit into the cell (+ sequence timing), then overlay its label.
     let fc = '';
@@ -500,7 +507,7 @@ async function stitchComparison(items, mode = 'grid', orientation = 'landscape')
       } else {
         fc += `[${i}:v]${fit}[s${i}];`;
       }
-      fc += labelIdx[i] >= 0 ? `[s${i}][${labelIdx[i]}:v]overlay=12:12[c${i}];` : `[s${i}]null[c${i}];`;
+      fc += labelIdx[i] >= 0 ? `[s${i}][${labelIdx[i]}:v]overlay=${overlayXY}[c${i}];` : `[s${i}]null[c${i}];`;
     }
     // Black fillers for any empty cells in the grid.
     const total = cols * rows;
@@ -829,6 +836,35 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Translate a batch of short strings (used by the Prompt Library's 中/EN
+    // toggle to localize Chinese case titles for English demos). Cheap model;
+    // the frontend caches results per source string so each is translated once.
+    if (p === '/api/translate' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      const texts = Array.isArray(body.texts) ? body.texts.slice(0, 200).map(String) : [];
+      if (!texts.length) return json(req, res, { ok: true, translations: [] });
+      const target = body.target === 'zh' ? 'Simplified Chinese' : 'English';
+      try {
+        const { privateKey } = getWallet();
+        if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found.' }, 400);
+        const client = new LLMClient({ privateKey, apiUrl });
+        const sys = `You are a translator. Translate each string in the input JSON array to natural ${target}. Preserve any leading numbering like "例 104:" as "Example 104:". Return ONLY a JSON array of strings — same length and order as the input, no commentary.`;
+        const resp = await client.chatCompletion('anthropic/claude-haiku-4.5',
+          [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify(texts) }],
+          { maxTokens: 3000, temperature: 0 });
+        const txt = resp?.choices?.[0]?.message?.content || '[]';
+        let arr;
+        try { arr = JSON.parse(txt); } catch { const m = txt.match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : null; }
+        if (!Array.isArray(arr) || arr.length !== texts.length) arr = texts; // identity fallback
+        return json(req, res, { ok: true, translations: arr.map(String) });
+      } catch (err) {
+        console.warn(`[translate] FAIL: ${err.message || err}`);
+        return json(req, res, { ok: false, error: err.message || String(err) }, 502);
+      }
+    }
+
     if (p === '/api/comparison/stitch' && req.method === 'POST') {
       const raw = await readBody(req);
       let body;
@@ -836,9 +872,10 @@ const server = http.createServer(async (req, res) => {
       const items = Array.isArray(body.items) ? body.items : [];
       const mode = body.mode === 'sequence' ? 'sequence' : 'grid';
       const orientation = body.orientation === 'portrait' ? 'portrait' : 'landscape';
+      const labelPos = body.labelPos && typeof body.labelPos === 'object' ? body.labelPos : undefined;
       const t0 = Date.now();
       try {
-        const out = await stitchComparison(items, mode, orientation);
+        const out = await stitchComparison(items, mode, orientation, labelPos);
         console.log(`[comparison] stitched ${items.length} videos (${mode}/${orientation}) in ${Date.now() - t0}ms`);
         return json(req, res, { ok: true, ...out });
       } catch (err) {

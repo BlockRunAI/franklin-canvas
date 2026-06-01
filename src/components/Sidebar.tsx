@@ -16,8 +16,8 @@ type SettingsSection = 'wallet' | 'models' | 'canvas' | 'about';
 interface NavItem { id: Route; labelKey: StringKey; Icon: typeof Workflow; }
 const ITEMS: NavItem[] = [
   { id: 'canvas',     labelKey: 'sidebar_canvas',     Icon: Workflow },
-  { id: 'comparison', labelKey: 'sidebar_comparison', Icon: Columns3 },
   { id: 'projects',   labelKey: 'sidebar_projects',   Icon: LayoutGrid },
+  { id: 'comparison', labelKey: 'sidebar_comparison', Icon: Columns3 },
 ];
 
 interface Props {
@@ -101,7 +101,7 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
           <Settings size={16} strokeWidth={1.75} aria-hidden />
           <span>{t('sidebar_settings')}</span>
         </button>
-        <div className="version" aria-hidden>franklin-canvas · v0.0.1</div>
+        <div className="version" aria-hidden>franklin-canvas · v0.1.0</div>
       </div>
     </nav>
   );

@@ -121,8 +121,9 @@ export default function AgentPanel({ open, onClose, api }: Props) {
     if (!s) return;
     sessionId.current = s.id;
     turnsRef.current = s.turns || [];
-    tid.current = (s.trace.reduce((m, t) => Math.max(m, t.id), 0) || 0) + 1;
-    setTrace(s.trace); setRunning(false); setConfirm(null); setAwaitingAsk(false);
+    const tr = s.trace ?? [];
+    tid.current = (tr.reduce((m, t) => Math.max(m, t.id), 0) || 0) + 1;
+    setTrace(tr); setRunning(false); setConfirm(null); setAwaitingAsk(false);
     setHistoryOpen(false);
   };
 
@@ -234,7 +235,7 @@ export default function AgentPanel({ open, onClose, api }: Props) {
                     <div key={s.id} className={`agent-history-item ${s.id === sessionId.current ? 'is-current' : ''}`}>
                       <button className="agent-history-load" onClick={() => loadSession(s.id)}>
                         <span className="agent-history-title">{s.title}</span>
-                        <span className="agent-history-meta">{s.trace.filter((t) => t.kind === 'user').length} msg · {s.trace.filter((t) => t.kind === 'tool').length} tools</span>
+                        <span className="agent-history-meta">{(s.trace ?? []).filter((t) => t.kind === 'user').length} msg · {(s.trace ?? []).filter((t) => t.kind === 'tool').length} tools</span>
                       </button>
                       <button className="agent-history-del" onClick={() => removeSession(s.id)} aria-label="Delete chat"><Trash2 size={13} aria-hidden /></button>
                     </div>

@@ -2,7 +2,8 @@
 
 <p align="center">
 A node-based AI media studio — generate <strong>images, video and music</strong> on an
-infinite canvas, paid live in <strong>USDC</strong> on Base or Solana via x402.
+infinite canvas, chain them into visual workflows, and let an <strong>AI agent</strong> build them for you.
+<br/><sub>Pay-per-use in USDC via x402 — no subscription, no API keys.</sub>
 </p>
 
 <p align="center">
@@ -12,24 +13,61 @@ infinite canvas, paid live in <strong>USDC</strong> on Base or Solana via x402.
 <img alt="x402" src="https://img.shields.io/badge/payment-x402-blue.svg">
 </p>
 
-Drop a node, type a prompt, hit Send. No subscription, no account, no API key — every
-generation pays per call from a local USDC wallet that auto-creates on first launch.
-Built on the [Franklin core](https://github.com/BlockRunAI/Franklin) SDK for wallet +
-x402 plumbing, but a separate product aimed at creators rather than CLI users.
+Drop a node, type a prompt, hit Send — then wire nodes into a workflow (image → animate →
+stitch), or just describe what you want and let the **Media Agent** build it on the canvas.
+An infinite canvas for **image, video and music**, with side-by-side **model comparison**,
+in-canvas editing, a 848-case prompt library, timeline, and three themes. Generations pay
+per call from a local wallet (built on the [Franklin core](https://github.com/BlockRunAI/Franklin)
+SDK) — no subscription, no account, no API keys.
+
+## Demos
+
+<table>
+<tr>
+<td width="50%" align="center">
+
+**🤖 Media Agent**
+
+<sub>Describe it — the agent plans and builds the workflow on the canvas, step by step.</sub>
+
+<!-- Record a clip, then:  ./scripts/demo-gif.sh recording.mov agent-demo
+     …and replace the line below with:  ![Media Agent demo](assets/agent-demo.gif)
+     (or drag assets/agent-demo.mp4 into the GitHub README editor for an inline video) -->
+<em>▶︎ demo coming soon</em>
+
+</td>
+<td width="50%" align="center">
+
+**⚖️ Model Comparison**
+
+<sub>One prompt → several video models in parallel → one stitched comparison clip.</sub>
+
+![Model Comparison demo](assets/comparison-demo.gif)
+
+<sub>▶︎ <a href="assets/comparison-demo.mp4">Watch in HD (MP4)</a></sub>
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## Highlights
 
-- **Zero-config wallet.** First `npm start` mints a Base wallet under `~/.blockrun/wallet`
-  (and a Solana one at `~/.blockrun/solana-wallet`) — same file Franklin core uses, so
-  the two share one wallet per machine. The PromptBar shows the address; send USDC to
-  it and you're generating.
-- **Pay-per-call in USDC, Base *or* Solana.** Switch chain at runtime in
-  `Settings → Wallet`. Every call settles via x402; no usage cap, no monthly bill.
-- **Multi-model, multi-modal.** 7 image models, 5 video models, 1 music model, and
-  the full chat catalog — pricing pulled from the BlockRun gateway so the cost shown
-  next to Send is what you actually pay.
+- **🤖 Media Agent.** Describe what you want — *"a cinematic fox clip in a snowy forest,
+  with a soundtrack"* — and a real **tool-calling agent** builds it on the canvas step by
+  step. It generates, chains image→video, edits / inpaints, upscales, stitches, and
+  *looks at* its own results with vision before deciding the next move — and can search
+  the web, recall saved preferences, poll a model panel, or touch local files / shell
+  when a task needs it. Manual mode confirms each paid step with its cost; Auto mode runs
+  the whole workflow. A live tool trace shows every action as nodes appear on the canvas.
+- **⚖️ Model Comparison.** Run one prompt through up to **5 video models at once**, watch
+  them play in a synchronized grid, then stitch into a single deliverable MP4 — *grid*
+  (all together) or *sequence* (one at a time, others frozen on their first frame),
+  landscape or **portrait 9:16 for TikTok**. Per-clip model watermark is optional and
+  **drag-to-position** so it never covers the action.
+- **Multi-model, multi-modal.** 7 image models, 5 video models, 1 music model, plus the
+  full chat catalog — mix and match per node, with the live per-call cost shown next to Send.
 - **Contextual PromptBar.** Select a node and type — the bar binds to it. Attach a
   reference image with the paperclip (or pick one already on the canvas) for
   image-to-image and image-to-video. A gear opens video settings (aspect / resolution
@@ -56,6 +94,9 @@ x402 plumbing, but a separate product aimed at creators rather than CLI users.
 - **Projects.** Each project is its own saved canvas; ProjectsView lists them with
   cover thumbnails, rename, delete. Esc returns to the canvas.
 - **Multi-project, undo/redo, ⌘V paste-to-upload, drag-from-handle to spawn next.**
+- **Pay-per-use, no accounts.** Generations settle in USDC via x402 from a local wallet that
+  auto-creates on first launch (Base or Solana, switchable in Settings) — no subscription, no
+  API keys, no dashboards. Shares one wallet with Franklin core.
 
 ## Quick start
 
@@ -107,13 +148,24 @@ multi-tenant deployment needs additional work.
 
 ```
 Browser  (Vite dev / built dist/)
-   │  fetch /api/...  (wallet · generate · prompts · transactions)
+   │  fetch /api/...  (wallet · generate · prompts · agent · comparison · transactions)
    ▼
 server.mjs  (this repo)
    │  @blockrun/llm  (signs x402 payments on Base or Solana)
    ▼
 BlockRun gateway  ──  image / video / music / chat models
 ```
+
+**The Media Agent** is a real tool-calling loop, run frontend-driven: `/api/agent/chat`
+does one model turn (returning OpenAI-style tool calls), the panel executes them, and
+the results feed back until the model stops. Canvas/media tools run in the browser
+(create/chain/edit/upscale/stitch/describe nodes); the rest — web search, memory,
+mixture-of-agents, filesystem, shell — run on the backend via `/api/agent/tool`. Tool
+specs and the backend executors live in `agent-tools.mjs`.
+
+**Model Comparison** fans one prompt out to N video models in parallel, then composites
+the finished clips with ffmpeg (`/api/comparison/stitch`) — grid or sequence, landscape
+or portrait, with the model badge burned in at a caller-chosen position.
 
 The frontend is model-agnostic: it POSTs `{ kind, prompt, model, … }` to
 `/api/generate`, and the backend maps that onto the right `@blockrun/llm` client
@@ -153,16 +205,18 @@ actually charges (not a hardcoded guess that drifts).
 
 ```
 src/
-  views/        CanvasView · ProjectsView
+  views/        CanvasView · ProjectsView · ComparisonView
   canvas/       nodes · edges · PromptBar · PromptLibrary · SettingsDialog ·
                 VideoSettingsPanel · LyricsPanel · NodeActionMenu ·
                 AnnotateModal · CanvasViewBar · prefsStore · themeStore ·
-                CanvasContext
-  components/   Sidebar · ModelDropdown · NodeFrame · Lightbox
+                CanvasContext · AgentPanel · agentTools · agentPrefsStore ·
+                agentSessionsStore
+  components/   Sidebar · ModelDropdown · NodeFrame · Lightbox · AgentMascot
   api/          franklin.ts  (HTTP client for /api)
   projects.ts   multi-project localStorage store
   uiStore.ts    cross-cutting UI state (prompt library open, etc.)
-server.mjs      self-contained backend (wallet · x402 · /api/generate · /api/prompts)
+agent-tools.mjs    agent tool specs + backend tool executors (web · memory · fs · shell …)
+server.mjs      self-contained backend (wallet · x402 · generate · prompts · agent · comparison)
 scripts/start.mjs  one-command launcher (backend + UI multiplexed stdout)
 ```
 
