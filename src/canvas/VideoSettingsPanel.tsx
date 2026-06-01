@@ -99,13 +99,25 @@ export default function VideoSettingsPanel({ value, onChange, durations = DEFAUL
       </section>
 
       <section className="panel-row">
-        <div className="panel-row-title">Duration</div>
-        <Segmented<number>
-          options={durations}
+        <div className="panel-row-title panel-row-title-inline">
+          <span>Duration</span>
+          <span className="panel-row-value">{value.durationS}s</span>
+        </div>
+        <input
+          type="range"
+          className="panel-slider"
+          min={durations[0]}
+          max={durations[durations.length - 1]}
+          step={1}
           value={value.durationS}
-          onChange={(v) => onChange({ ...value, durationS: v })}
-          render={(v) => `${v}s`}
+          onChange={(e) => onChange({ ...value, durationS: Number(e.target.value) })}
+          onClick={(e) => e.stopPropagation()}
+          aria-label="Duration in seconds"
         />
+        <div className="panel-slider-scale">
+          <span>{durations[0]}s</span>
+          <span>{durations[durations.length - 1]}s</span>
+        </div>
       </section>
 
       <section className="panel-row panel-row-inline">
