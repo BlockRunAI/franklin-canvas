@@ -19,14 +19,18 @@ const ZOOM_MAX = 8;
 const ZOOM_STEP = 0.2;
 
 export default function Lightbox({ src, kind, onClose, onPrev, onNext }: Props) {
-  const [scale, setScale] = useState(1);
-  const [tx, setTx] = useState(0);
-  const [ty, setTy] = useState(0);
+  // All three transform values in ONE state object so the functional
+  // updater can read them atomically — rapid wheel events were producing
+  // drift because separate setScale / setTx / setTy closures saw stale
+  // values from previous renders. With a single setView((v) => …) every
+  // event reads the latest committed transform.
+  const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
+  const RESET = { scale: 1, tx: 0, ty: 0 };
   const dragRef = useRef<{ startX: number; startY: number; tx0: number; ty0: number } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
 
   // Reset transform whenever the source changes (clicking next/prev).
-  useEffect(() => { setScale(1); setTx(0); setTy(0); }, [src]);
+  useEffect(() => { setView(RESET); /* eslint-disable-next-line */ }, [src]);
 
   // Suppress floating React Flow node toolbars while the preview is open —
   // those NodeToolbars portal to body and used to bleed over the image.
@@ -39,22 +43,24 @@ export default function Lightbox({ src, kind, onClose, onPrev, onNext }: Props) 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowLeft') { setScale(1); setTx(0); setTy(0); onPrev?.(); }
-      else if (e.key === 'ArrowRight') { setScale(1); setTx(0); setTy(0); onNext?.(); }
-      else if (e.key === '+' || e.key === '=') setScale((s) => Math.min(ZOOM_MAX, s + ZOOM_STEP));
-      else if (e.key === '-' || e.key === '_') setScale((s) => {
-        const next = Math.max(ZOOM_MIN, s - ZOOM_STEP);
-        if (next === 1) { setTx(0); setTy(0); }
-        return next;
+      else if (e.key === 'ArrowLeft') { setView(RESET); onPrev?.(); }
+      else if (e.key === 'ArrowRight') { setView(RESET); onNext?.(); }
+      else if (e.key === '+' || e.key === '=') setView((v) => ({ ...v, scale: Math.min(ZOOM_MAX, v.scale + ZOOM_STEP) }));
+      else if (e.key === '-' || e.key === '_') setView((v) => {
+        const next = Math.max(ZOOM_MIN, v.scale - ZOOM_STEP);
+        return next === 1 ? RESET : { ...v, scale: next };
       });
-      else if (e.key === '0') { setScale(1); setTx(0); setTy(0); }
+      else if (e.key === '0') setView(RESET);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose, onPrev, onNext]);
 
   // Scroll-wheel zoom centered on the cursor. Trackpad pinch arrives as a
-  // wheel event with ctrlKey on macOS — the same code path handles both.
+  // wheel event with ctrlKey on macOS — same code path. The functional
+  // setView keeps the three transform values in sync atomically across
+  // rapid events (the previous split state was drifting on fast scrolls).
   const onWheel = (e: React.WheelEvent) => {
     if (kind !== 'image') return;
     const stage = stageRef.current;
@@ -62,31 +68,29 @@ export default function Lightbox({ src, kind, onClose, onPrev, onNext }: Props) 
     const rect = stage.getBoundingClientRect();
     const cx = e.clientX - rect.left - rect.width / 2;
     const cy = e.clientY - rect.top - rect.height / 2;
-    setScale((prevS) => {
-      const dir = e.deltaY < 0 ? 1 : -1;
-      const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prevS + dir * ZOOM_STEP));
-      if (next === prevS) return prevS;
-      // Re-anchor so the point under the cursor stays put while zooming.
-      const ix = (cx - tx) / prevS;
-      const iy = (cy - ty) / prevS;
-      setTx(cx - ix * next);
-      setTy(cy - iy * next);
-      if (next === 1) { setTx(0); setTy(0); }
-      return next;
+    const dir = e.deltaY < 0 ? 1 : -1;
+    setView((v) => {
+      const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v.scale + dir * ZOOM_STEP));
+      if (next === v.scale) return v;
+      if (next === 1) return RESET;
+      // Image-space point currently under the cursor.
+      const ix = (cx - v.tx) / v.scale;
+      const iy = (cy - v.ty) / v.scale;
+      // Re-anchor so that point stays put after the zoom.
+      return { scale: next, tx: cx - ix * next, ty: cy - iy * next };
     });
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (kind !== 'image' || scale === 1) return;
+    if (kind !== 'image' || view.scale === 1) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { startX: e.clientX, startY: e.clientY, tx0: tx, ty0: ty };
+    dragRef.current = { startX: e.clientX, startY: e.clientY, tx0: view.tx, ty0: view.ty };
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
-    setTx(d.tx0 + (e.clientX - d.startX));
-    setTy(d.ty0 + (e.clientY - d.startY));
+    setView((v) => ({ ...v, tx: d.tx0 + (e.clientX - d.startX), ty: d.ty0 + (e.clientY - d.startY) }));
   };
   const onPointerUp = (e: React.PointerEvent) => {
     if (!dragRef.current) return;
@@ -97,20 +101,19 @@ export default function Lightbox({ src, kind, onClose, onPrev, onNext }: Props) 
   const onDoubleClick = (e: React.MouseEvent) => {
     if (kind !== 'image') return;
     e.stopPropagation();
-    if (scale === 1) {
-      // Zoom to 2× anchored on the cursor.
+    setView((v) => {
+      if (v.scale !== 1) return RESET;
       const stage = stageRef.current;
-      if (!stage) { setScale(2); return; }
+      if (!stage) return { scale: 2, tx: 0, ty: 0 };
       const rect = stage.getBoundingClientRect();
       const cx = e.clientX - rect.left - rect.width / 2;
       const cy = e.clientY - rect.top - rect.height / 2;
-      setTx(-cx); setTy(-cy);
-      setScale(2);
-    } else {
-      setScale(1); setTx(0); setTy(0);
-    }
+      // Zoom to 2× centered on the cursor.
+      return { scale: 2, tx: -cx, ty: -cy };
+    });
   };
 
+  const { scale, tx, ty } = view;
   const dragging = !!dragRef.current;
   return (
     <div className="lightbox-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label="Preview">
