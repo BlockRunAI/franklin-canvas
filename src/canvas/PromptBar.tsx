@@ -28,6 +28,13 @@ const MODE_META: Record<Mode, { label: string; icon: LucideIcon; models: { id: s
   musicgen: { label: 'Music', icon: Music, models: MUSIC_MODELS },
 };
 
+// Image models that accept multi-image fusion on the gateway
+// (/api/v1/images/image2image image[]). Mirrors EDIT_SUPPORTED_MODELS there.
+const MULTI_IMAGE_MODELS = new Set<string>([
+  'openai/gpt-image-1', 'openai/gpt-image-2',
+  'google/nano-banana', 'google/nano-banana-pro',
+]);
+
 interface Props {
   onSend: (payload: {
     nodeId: string | null;
@@ -35,8 +42,12 @@ interface Props {
     prompt: string;
     model: string;
     /** Reference image attached via the picker / paperclip. Drives
-     *  image-to-image (imagegen.edit) and image-to-video. */
+     *  image-to-image (imagegen.edit) and image-to-video (first frame). */
     referenceUrl: string | null;
+    /** Second reference image. For imagegen → multi-image fusion (e.g. style
+     *  from img1 + subject from img2). For videogen → the LAST frame
+     *  (first-and-last-frame interpolation, Seedance only). */
+    referenceUrl2?: string | null;
   }) => void;
 }
 
@@ -62,11 +73,15 @@ function ReferencePicker({
   onPick,
   onClear,
   onUploadClick,
+  caption,
 }: {
   attachment: string | null;
   onPick: (url: string) => void;
   onClear: () => void;
   onUploadClick: () => void;
+  /** Optional tiny label under the slot — used to distinguish dual slots
+   *  (e.g. "参考1 / 参考2" for fusion, "首帧 / 尾帧" for first-last video). */
+  caption?: string;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -93,7 +108,8 @@ function ReferencePicker({
     return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey); };
   }, [open]);
   return (
-    <div className="pb-ref-picker" ref={rootRef}>
+    <div className={`pb-ref-picker ${caption ? 'has-caption' : ''}`} ref={rootRef}>
+      {caption && <span className="pb-ref-caption">{caption}</span>}
       {attachment ? (
         <button
           type="button"
@@ -173,6 +189,8 @@ export default function PromptBar({ onSend }: Props) {
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState<string>(IMAGE_MODELS[0].id);
   const [attachment, setAttachment] = useState<string | null>(null);
+  // Second reference: image fusion (imagegen) or last frame (videogen).
+  const [attachment2, setAttachment2] = useState<string | null>(null);
   // Settings popover state for the gear button. Same panel surface used on
   // the node, just anchored to the PromptBar so users can tweak size /
   // aspect / duration without clicking away from the prompt area.
@@ -221,6 +239,7 @@ export default function PromptBar({ onSend }: Props) {
       setPrompt(d.prompt ?? '');
       setModel(d.model ?? MODE_META[bound].models[0].id);
       setAttachment(d.referenceUrl ?? null);
+      setAttachment2((d as { referenceUrl2?: string }).referenceUrl2 ?? null);
     }
   }, [selectedNode?.id, bound]);
 
@@ -240,6 +259,24 @@ export default function PromptBar({ onSend }: Props) {
     setAttachment(null);
     if (selectedId) updateNodeData(selectedId, { referenceUrl: undefined });
   };
+  // Second slot (fusion / last frame) — same flow, separate file input + key.
+  const fileRef2 = useRef<HTMLInputElement>(null);
+  const onAttachClick2 = () => fileRef2.current?.click();
+  const onAttachFile2 = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      setAttachment2(url);
+      if (selectedId) updateNodeData(selectedId, { referenceUrl2: url });
+    };
+    reader.readAsDataURL(file);
+  };
+  const clearAttachment2 = () => {
+    setAttachment2(null);
+    if (selectedId) updateNodeData(selectedId, { referenceUrl2: undefined });
+  };
 
   // The bar is contextual to a generation node — hide it when nothing
   // relevant is selected.
@@ -249,9 +286,27 @@ export default function PromptBar({ onSend }: Props) {
   const meta = MODE_META[mode];
   const ModeIcon = meta.icon;
 
+  // A second image input is meaningful only for: image fusion (gpt-image /
+  // nano-banana) and first-and-last-frame video (Seedance). Other models hide
+  // the slot and never receive a second reference.
+  const supportsSecondImage =
+    (mode === 'imagegen' && MULTI_IMAGE_MODELS.has(model)) ||
+    (mode === 'videogen' && model.startsWith('bytedance/seedance'));
+  // Progressive disclosure: the 2nd slot only appears once the 1st is filled,
+  // so the bar stays clean until you actually want a second reference.
+  const showSecondSlot = supportsSecondImage && !!attachment;
+  // Video frames are order-sensitive (first vs last), so label them; image
+  // fusion references are interchangeable and need no caption.
+  const captions: [string, string] | null =
+    mode === 'videogen' ? ['First', 'Last'] : null;
+
   const send = () => {
     if (!prompt.trim()) return;
-    onSend({ nodeId: selectedId, mode, prompt, model, referenceUrl: attachment });
+    onSend({
+      nodeId: selectedId, mode, prompt, model,
+      referenceUrl: attachment,
+      referenceUrl2: supportsSecondImage ? attachment2 : null,
+    });
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -278,6 +333,7 @@ export default function PromptBar({ onSend }: Props) {
       <div className="prompt-bar-top">
         <ReferencePicker
           attachment={attachment}
+          caption={captions?.[0]}
           onPick={(url) => {
             setAttachment(url);
             if (selectedId) updateNodeData(selectedId, { referenceUrl: url });
@@ -286,6 +342,21 @@ export default function PromptBar({ onSend }: Props) {
           onUploadClick={onAttachClick}
         />
         <input ref={fileRef} type="file" accept="image/*" onChange={onAttachFile} hidden />
+        {showSecondSlot && (
+          <>
+            <ReferencePicker
+              attachment={attachment2}
+              caption={captions?.[1]}
+              onPick={(url) => {
+                setAttachment2(url);
+                if (selectedId) updateNodeData(selectedId, { referenceUrl2: url });
+              }}
+              onClear={clearAttachment2}
+              onUploadClick={onAttachClick2}
+            />
+            <input ref={fileRef2} type="file" accept="image/*" onChange={onAttachFile2} hidden />
+          </>
+        )}
         <div className="pb-flex" />
         {bound && selectedNode && (
           <span className="pb-bound-chip">
@@ -297,7 +368,13 @@ export default function PromptBar({ onSend }: Props) {
       <textarea
         className="prompt-bar-input"
         value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
+        onChange={(e) => {
+          setPrompt(e.target.value);
+          // Persist as you type so the draft survives deselect→reselect (the
+          // hydrate effect reads it back from node data). No effect re-run since
+          // it's keyed on node id, not the data object.
+          if (selectedId) updateNodeData(selectedId, { prompt: e.target.value });
+        }}
         onKeyDown={onKeyDown}
         placeholder={t('pb_placeholder')}
         rows={3}
@@ -311,7 +388,7 @@ export default function PromptBar({ onSend }: Props) {
           </span>
         </div>
         <div className="pb-divider" />
-        <ModelDropdown models={meta.models} value={model} onChange={setModel} />
+        <ModelDropdown models={meta.models} value={model} onChange={(m) => { setModel(m); if (selectedId) updateNodeData(selectedId, { model: m }); }} />
         {/* Settings gear — Video (aspect / resolution / duration / audio) and
             Image (aspect ratio / quality). Music settings live in the music
             node's lyrics popover. */}

@@ -500,6 +500,7 @@ function CanvasInner() {
       lyrics?: string;
       lyricsMode?: 'adaptive' | 'custom';
       referenceUrl?: string;
+      referenceUrl2?: string;
     };
 
     let cancelled = false;
@@ -521,6 +522,9 @@ function CanvasInner() {
     const rawRef = (mode === 'imagegen' || mode === 'videogen') ? (referenceUrlOverride ?? d.referenceUrl) : undefined;
     // Video seed images especially must be small; shrink before sending.
     const imageUrl = await shrinkReference(rawRef, mode === 'videogen' ? 768 : 1024);
+    // Second image: imagegen → fusion reference; videogen → last frame.
+    const rawRef2 = (mode === 'imagegen' || mode === 'videogen') ? d.referenceUrl2 : undefined;
+    const imageUrl2 = await shrinkReference(rawRef2, mode === 'videogen' ? 768 : 1024);
 
     const kindMap = { imagegen: 'image', videogen: 'video', musicgen: 'music' } as const;
     const result = await generate({
@@ -531,6 +535,7 @@ function CanvasInner() {
       lyrics: mode === 'musicgen' && d.lyricsMode === 'custom' ? d.lyrics : undefined,
       instrumental: mode === 'musicgen' ? !d.lyrics && d.lyricsMode === 'adaptive' ? false : undefined : undefined,
       imageUrl,
+      imageUrl2,
       // Gateway params from the node's settings panel. Aspect ratio applies to
       // both image and video; quality is image-only; resolution/audio video-only.
       aspectRatio: (mode === 'videogen' || mode === 'imagegen') ? d.ratio : undefined,
@@ -601,13 +606,15 @@ function CanvasInner() {
     prompt: string;
     model: string;
     referenceUrl: string | null;
+    referenceUrl2?: string | null;
   }) => {
     const ref = payload.referenceUrl || undefined;
+    const ref2 = payload.referenceUrl2 || undefined;
     if (payload.nodeId) {
       const target = nodes.find((n) => n.id === payload.nodeId);
       if (target && target.type === payload.mode) {
         setNodes((nds) => nds.map((n) => (n.id === payload.nodeId
-          ? { ...n, data: { ...n.data, prompt: payload.prompt, model: payload.model, referenceUrl: ref, status: 'running', progress: 0 } }
+          ? { ...n, data: { ...n.data, prompt: payload.prompt, model: payload.model, referenceUrl: ref, referenceUrl2: ref2, status: 'running', progress: 0 } }
           : n)));
         void simulateGen(payload.nodeId, payload.mode, payload.prompt, ref);
         return;
@@ -622,7 +629,7 @@ function CanvasInner() {
       id,
       type: entry.type,
       position: { x, y },
-      data: { ...entry.defaultData, prompt: payload.prompt, model: payload.model, referenceUrl: ref, status: 'idle' as NodeStatus },
+      data: { ...entry.defaultData, prompt: payload.prompt, model: payload.model, referenceUrl: ref, referenceUrl2: ref2, status: 'idle' as NodeStatus },
     };
     setNodes((nds) => [...nds, newNode]);
     void simulateGen(id, payload.mode, payload.prompt, ref);

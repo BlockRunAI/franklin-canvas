@@ -164,8 +164,12 @@ async function generateImage(body, jobId) {
   if (body.aspectRatio && IMG_SIZE[body.aspectRatio]) opts.size = IMG_SIZE[body.aspectRatio];
   if (body.quality === 'standard' || body.quality === 'hd') opts.quality = body.quality;
   const before = client.getSpending?.();
+  // Two reference images → multi-image fusion (the gateway's image2image `image`
+  // field accepts an array; the SDK forwards it verbatim). e.g. style from img1
+  // + subject from img2. One image → normal image-to-image. None → text-to-image.
+  const editImages = body.imageUrl2 ? [body.imageUrl, body.imageUrl2] : body.imageUrl;
   const result = body.imageUrl
-    ? await client.edit(body.prompt, body.imageUrl, opts)
+    ? await client.edit(body.prompt, editImages, opts)
     : await client.generate(body.prompt, opts);
   const after = client.getSpending?.();
   const remoteUrl = result?.data?.[0]?.url;
@@ -250,6 +254,9 @@ async function generateVideo(body, jobId) {
     model,
     prompt: body.prompt,
     ...(body.imageUrl ? { image_url: body.imageUrl } : {}),
+    // Second image on a video job = the LAST frame (first-and-last-frame
+    // interpolation; Seedance only, gateway validates support).
+    ...(body.imageUrl2 ? { last_frame_url: body.imageUrl2 } : {}),
     ...(body.durationS ? { duration_seconds: body.durationS } : {}),
     ...(body.aspectRatio ? { aspect_ratio: body.aspectRatio } : {}),
     ...(body.resolution ? { resolution: body.resolution } : {}),

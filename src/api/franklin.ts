@@ -170,6 +170,8 @@ export interface GenerateRequest {
   lyrics?: string;
   instrumental?: boolean;
   imageUrl?: string;
+  /** Second image. kind:image → multi-image fusion; kind:video → last frame. */
+  imageUrl2?: string;
   aspectRatio?: 'adaptive' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '21:9' | '9:21';
   resolution?: '360p' | '480p' | '540p' | '720p' | '1080p' | '1K' | '2K' | '4K';
   generateAudio?: boolean;

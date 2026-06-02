@@ -2,7 +2,8 @@
 // Image / video catalogs are the known-valid models on the BlockRun gateway.
 
 import { Handle, NodeResizer, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { Upload, ImageIcon, Film, Type, SquareDashed, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus } from 'lucide-react';
 import NodeFrame from './NodeFrame';
 import NodeActionMenu from './NodeActionMenu';
@@ -755,6 +756,11 @@ export function TimelineNode({ data, id }: NodeProps) {
   const { exportTimeline } = useCanvasCtx();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+  // Floating readout shown while dragging/trimming (duration / drop position).
+  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
+  // Timeline zoom = pixels per second. Lets you spread short 4–8s clips wide
+  // enough to trim precisely, or zoom out to see a long cut at a glance.
+  const [pps, setPps] = useState(TIMELINE_PX_PER_SEC);
 
   // React Flow scales the DOM via a CSS transform, so screen-pixel deltas must
   // be divided by the zoom to recover canvas pixels (→ seconds). Read it live.
@@ -766,6 +772,10 @@ export function TimelineNode({ data, id }: NodeProps) {
   clipsRef.current = clips;
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+  const ppsRef = useRef(pps);
+  ppsRef.current = pps;
+  // True while a clip is being dragged/trimmed — suppresses hover-scrub.
+  const draggingRef = useRef(false);
 
   // Pull every finished video/music clip from the canvas, capturing each
   // source node's durationS so the track can lay them out proportionally.
@@ -789,10 +799,13 @@ export function TimelineNode({ data, id }: NodeProps) {
   const total = Math.max(videoTotal, audioTotal);
   // Round track length up to the next 5s so the ruler ends on a clean tick.
   const trackSeconds = Math.max(TIMELINE_MIN_DURATION, Math.ceil(total / 5) * 5);
-  const trackWidthPx = trackSeconds * TIMELINE_PX_PER_SEC;
-  const tickStep = trackSeconds > 60 ? 10 : 5;
+  const trackWidthPx = trackSeconds * pps;
+  // Tick spacing adapts to zoom so labels never crowd (keep ≥ 48px apart).
+  let tickStep = trackSeconds > 60 ? 10 : 5;
+  while (tickStep * pps < 48) tickStep *= 2;
   const ticks: number[] = [];
   for (let t = 0; t <= trackSeconds; t += tickStep) ticks.push(t);
+  const gridPx = `${tickStep * pps}px`;
 
   const setClips = (next: TimelineClip[]) => updateNodeData(id, { clips: next });
   const addClip = (c: TimelineClip) => {
@@ -806,8 +819,8 @@ export function TimelineNode({ data, id }: NodeProps) {
   const layout = (lane: TimelineClip[]) => {
     let off = 0;
     return lane.map((c) => {
-      const left = off * TIMELINE_PX_PER_SEC;
-      const width = Math.max(14, (c.durationS || 0) * TIMELINE_PX_PER_SEC);
+      const left = off * pps;
+      const width = Math.max(14, (c.durationS || 0) * pps);
       off += c.durationS || 0;
       return { ...c, leftPx: left, widthPx: width };
     });
@@ -835,35 +848,47 @@ export function TimelineNode({ data, id }: NodeProps) {
     const origDur = clip.durationS || 0;
     const srcDur = clip.srcDurationS ?? origDur;
     setDragId(clip.id);
+    draggingRef.current = true;
     let moved = false;
 
-    const secAt = (ev: PointerEvent) => ((ev.clientX - startX) / (TIMELINE_PX_PER_SEC * (zoomRef.current || 1)));
+    // px → seconds at the current timeline zoom AND canvas zoom.
+    const secAt = (ev: PointerEvent) => ((ev.clientX - startX) / (ppsRef.current * (zoomRef.current || 1)));
+    // Magnetic snap to the nearest whole second when within ~7px — gives the
+    // "clicks into place" feel of a real NLE without blocking fine control.
+    const snap = (sec: number) => {
+      const whole = Math.round(sec);
+      return Math.abs(sec - whole) * ppsRef.current <= 7 ? whole : round1(sec);
+    };
 
     const onMove = (ev: PointerEvent) => {
       const dSec = secAt(ev);
       if (mode === 'trim-r') {
-        const nd = clampN(round1(origDur + dSec), TIMELINE_MIN_CLIP, Math.max(TIMELINE_MIN_CLIP, srcDur - origIn));
+        const nd = clampN(snap(origDur + dSec), TIMELINE_MIN_CLIP, Math.max(TIMELINE_MIN_CLIP, srcDur - origIn));
         patchClip(clip.id, { durationS: nd });
+        setTip({ x: ev.clientX, y: ev.clientY, text: `${formatClip(nd)}` });
       } else if (mode === 'trim-l') {
-        const nIn = clampN(round1(origIn + dSec), 0, origIn + origDur - TIMELINE_MIN_CLIP);
-        patchClip(clip.id, { inS: nIn, durationS: round1(origDur - (nIn - origIn)) });
+        const nIn = clampN(snap(origIn + dSec), 0, origIn + origDur - TIMELINE_MIN_CLIP);
+        const nd = round1(origDur - (nIn - origIn));
+        patchClip(clip.id, { inS: nIn, durationS: nd });
+        setTip({ x: ev.clientX, y: ev.clientY, text: `${formatClip(nd)}` });
       } else {
         // Reorder: find where the dragged clip's new center lands among the
         // lane's clip widths, then splice it there.
         moved = true;
+        const ppsNow = ppsRef.current;
         const lane = clipsRef.current.filter((c) => c.kind === kind);
         const from = lane.findIndex((c) => c.id === clip.id);
         if (from < 0) return;
-        // Cumulative left edges of the lane in canvas px.
         let acc = 0;
-        const lefts = lane.map((c) => { const l = acc; acc += (c.durationS || 0) * TIMELINE_PX_PER_SEC; return l; });
+        const lefts = lane.map((c) => { const l = acc; acc += (c.durationS || 0) * ppsNow; return l; });
         const draggedLeft = lefts[from] + (ev.clientX - startX) / (zoomRef.current || 1);
-        const center = draggedLeft + ((clip.durationS || 0) * TIMELINE_PX_PER_SEC) / 2;
+        const center = draggedLeft + ((clip.durationS || 0) * ppsNow) / 2;
         let to = 0;
         for (let i = 0; i < lane.length; i++) {
-          const mid = lefts[i] + ((lane[i].durationS || 0) * TIMELINE_PX_PER_SEC) / 2;
+          const mid = lefts[i] + ((lane[i].durationS || 0) * ppsNow) / 2;
           if (center > mid) to = i; else break;
         }
+        setTip({ x: ev.clientX, y: ev.clientY, text: `#${to + 1}` });
         if (to !== from) {
           const next = [...lane];
           const [m] = next.splice(from, 1);
@@ -876,11 +901,31 @@ export function TimelineNode({ data, id }: NodeProps) {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       setDragId(null);
+      setTip(null);
+      draggingRef.current = false;
       void moved;
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
   };
+
+  // Hover-scrub: moving the cursor across a video clip seeks its preview frame
+  // to that point in the (trimmed) clip — like CapCut / Finder Quick Look.
+  const scrubThumb = (e: React.PointerEvent<HTMLVideoElement>, clip: TimelineClip) => {
+    if (draggingRef.current) return;
+    const v = e.currentTarget;
+    const rect = v.getBoundingClientRect();
+    const f = clampN((e.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+    const t = (clip.inS ?? 0) + f * (clip.durationS || 0);
+    if (Number.isFinite(t)) { try { v.currentTime = t; } catch { /* not seekable yet */ } }
+  };
+  const resetThumb = (e: React.PointerEvent<HTMLVideoElement>, clip: TimelineClip) => {
+    const v = e.currentTarget;
+    try { v.currentTime = clip.inS ?? 0; } catch { /* ignore */ }
+  };
+  // Double-click a trim handle to reset that clip back to its full source length.
+  const untrim = (clip: TimelineClip) =>
+    patchClip(clip.id, { inS: 0, durationS: clip.srcDurationS ?? clip.durationS });
 
   const renderBlock = (c: ReturnType<typeof layout>[number], i: number) => (
     <div
@@ -893,10 +938,18 @@ export function TimelineNode({ data, id }: NodeProps) {
       <span
         className="timeline-trim timeline-trim-l nodrag"
         onPointerDown={(e) => startDrag(e, c, 'trim-l')}
+        onDoubleClick={() => untrim(c)}
         aria-label="Trim start"
       />
       {c.kind === 'video' ? (
-        <video src={c.url} preload="metadata" muted className="timeline-block-thumb" />
+        <video
+          src={c.url}
+          preload="metadata"
+          muted
+          className="timeline-block-thumb"
+          onPointerMove={(e) => scrubThumb(e, c)}
+          onPointerLeave={(e) => resetThumb(e, c)}
+        />
       ) : (
         <div className="timeline-block-thumb timeline-block-audio"><Music size={16} aria-hidden /></div>
       )}
@@ -917,6 +970,7 @@ export function TimelineNode({ data, id }: NodeProps) {
       <span
         className="timeline-trim timeline-trim-r nodrag"
         onPointerDown={(e) => startDrag(e, c, 'trim-r')}
+        onDoubleClick={() => untrim(c)}
         aria-label="Trim end"
       />
     </div>
@@ -935,6 +989,20 @@ export function TimelineNode({ data, id }: NodeProps) {
           <span>{d.title || 'Timeline'}</span>
           <span className="timeline-head-spacer" />
           <span className="timeline-head-total">{formatMmSs(total)} / {formatMmSs(trackSeconds)}</span>
+          <div className="timeline-zoom nodrag" role="group" aria-label="Timeline zoom">
+            <button
+              type="button"
+              aria-label="Zoom out"
+              disabled={pps <= 8}
+              onClick={() => setPps((p) => clampN(round1(p / 1.4), 8, 80))}
+            >−</button>
+            <button
+              type="button"
+              aria-label="Zoom in"
+              disabled={pps >= 80}
+              onClick={() => setPps((p) => clampN(round1(p * 1.4), 8, 80))}
+            >+</button>
+          </div>
           <button
             type="button"
             className="timeline-export nodrag"
@@ -954,14 +1022,17 @@ export function TimelineNode({ data, id }: NodeProps) {
           {/* Ruler */}
           <div className="timeline-ruler" style={{ width: trackWidthPx }}>
             {ticks.map((t) => (
-              <span key={t} className="timeline-tick" style={{ left: t * TIMELINE_PX_PER_SEC }}>
+              <span key={t} className="timeline-tick" style={{ left: t * pps }}>
                 {formatMmSs(t)}
               </span>
             ))}
           </div>
 
           {/* Video lane */}
-          <div className="timeline-lane timeline-lane-video" style={{ width: trackWidthPx }}>
+          <div
+            className="timeline-lane timeline-lane-video"
+            style={{ width: trackWidthPx, ['--tl-grid' as string]: gridPx } as CSSProperties}
+          >
             {placedVideo.length === 0 ? (
               <div className="timeline-empty-pop">
                 <button
@@ -981,7 +1052,10 @@ export function TimelineNode({ data, id }: NodeProps) {
 
           {/* Audio / music lane — only shown once a soundtrack is added. */}
           {placedAudio.length > 0 && (
-            <div className="timeline-lane timeline-lane-audio" style={{ width: trackWidthPx }}>
+            <div
+              className="timeline-lane timeline-lane-audio"
+              style={{ width: trackWidthPx, ['--tl-grid' as string]: gridPx } as CSSProperties}
+            >
               {placedAudio.map((c, i) => renderBlock(c, i))}
             </div>
           )}
@@ -1013,6 +1087,10 @@ export function TimelineNode({ data, id }: NodeProps) {
         </div>
       </div>
       <AddSideButton id={id} side="left" />
+      {tip && createPortal(
+        <div className="timeline-tip" style={{ left: tip.x + 14, top: tip.y + 16 }}>{tip.text}</div>,
+        document.body,
+      )}
     </div>
   );
 }
