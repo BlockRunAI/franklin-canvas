@@ -535,7 +535,7 @@ function CanvasInner() {
       // both image and video; quality is image-only; resolution/audio video-only.
       aspectRatio: (mode === 'videogen' || mode === 'imagegen') ? d.ratio : undefined,
       resolution: mode === 'videogen' ? d.resolution : undefined,
-      generateAudio: mode === 'videogen' ? d.audio : undefined,
+      generateAudio: mode === 'videogen' ? (d.audio ?? true) : undefined, // default ON (audio is included in the price)
       quality: mode === 'imagegen' ? (d as { quality?: 'standard' | 'hd' }).quality : undefined,
     });
     cancelled = true;

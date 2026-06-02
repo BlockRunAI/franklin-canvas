@@ -56,9 +56,12 @@ export const IMAGE_MODELS = [
 
 // per-second pricing; cheapest first so the demo default cost stays low.
 export const VIDEO_MODELS = [
-  { id: 'xai/grok-imagine-video', label: 'Grok Imagine', pricePerS: 0.05 },
+  // pricePerS = the gateway's actual per-second charge incl. its 5% margin
+  // (verified against the live /v1/videos/generations quote). Seedance is
+  // token-billed at 720p; 1080p costs ~2.25× (not reflected in this flat estimate).
+  { id: 'xai/grok-imagine-video', label: 'Grok Imagine', pricePerS: 0.0525 },
   { id: 'bytedance/seedance-1.5-pro', label: 'Seedance 1.5 Pro', pricePerS: 0.092 },
-  { id: 'azure/sora-2', label: 'Sora 2', pricePerS: 0.10 },
+  { id: 'azure/sora-2', label: 'Sora 2', pricePerS: 0.105 },
   { id: 'bytedance/seedance-2.0-fast', label: 'Seedance 2.0 Fast', pricePerS: 0.238 },
   { id: 'bytedance/seedance-2.0', label: 'Seedance 2.0 Pro', pricePerS: 0.298 },
 ];
@@ -904,7 +907,7 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
   { type: 'imagegen', label: 'Image', description: 'Photoreal, stylized, anime', category: 'generate', icon: ImageIcon,
     defaultData: { model: IMAGE_MODELS[0].id, prompt: '', priceUsd: IMAGE_MODELS[0].price } },
   { type: 'videogen', label: 'Video', description: '5–30s clips, multi-model', category: 'generate', icon: Film,
-    defaultData: { model: VIDEO_MODELS[0].id, prompt: '', priceUsd: VIDEO_MODELS[0].pricePerS * 8, durationS: 8 } },
+    defaultData: { model: VIDEO_MODELS[0].id, prompt: '', priceUsd: VIDEO_MODELS[0].pricePerS * 8, durationS: 8, audio: true } },
   { type: 'musicgen', label: 'Music', description: '~3min tracks with optional lyrics', category: 'generate', icon: Music,
     defaultData: { model: MUSIC_MODELS[0].id, prompt: '', priceUsd: MUSIC_MODELS[0].price, lyricsMode: 'adaptive', lyrics: '' } },
   // Utility
