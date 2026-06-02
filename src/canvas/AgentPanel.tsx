@@ -191,6 +191,9 @@ export default function AgentPanel({ open, onClose, api }: Props) {
         if (msg.content) push({ kind: 'agent', text: msg.content });
         const calls = msg.tool_calls || [];
         if (calls.length === 0) break; // model is done
+        // Run tools one at a time. (The gateway has no server-side queue and the
+        // upstream providers serialize/throttle anyway, so client concurrency
+        // just floods the queue — sequential gives steadier progress.)
         for (const call of calls) {
           if (stopRef.current) { turnsRef.current.push(toolMsg(call, 'Stopped by user.')); continue; }
           await runOneTool(call);
@@ -207,8 +210,6 @@ export default function AgentPanel({ open, onClose, api }: Props) {
     try { input = JSON.parse(call.function.arguments || '{}'); } catch { /* keep {} */ }
     const label = toolLabel(name, input);
     const cost = estimateToolCost(name, input, { imageModel, videoModel });
-
-    // Cost / side-effect confirm (manual mode only).
     if (mode === 'manual' && CONFIRM_TOOLS.has(name)) {
       const ok = await askConfirm(label, cost);
       if (!ok) {
@@ -217,7 +218,6 @@ export default function AgentPanel({ open, onClose, api }: Props) {
         return;
       }
     }
-
     const itemId = push({ kind: 'tool', tool: name, label, status: 'running' as TraceStatus, cost });
     let output = '';
     try {

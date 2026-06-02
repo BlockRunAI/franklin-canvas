@@ -463,7 +463,8 @@ How to work:
 - For "make a video of X": usually generate_image (establish the look) → generate_video with from_node_id set to that image (animate it) → optionally generate_music. But adapt to the request.
 - Tools that return a node_id let you chain: pass that id as reference_node_id / from_node_id / node_id to the next tool.
 - Use list_canvas to see what exists. Each line shows the node's type, status, whether it has a result, AND its connections: "← from X" (X feeds this node) and "→ to Y" (this node feeds Y). Use these to understand the graph before acting. Before animating an image, check if it already has a video "→ to" it — if so, don't create a duplicate; regenerate that existing video instead. Use delete_node to clean up failed/rejected nodes when asked to tidy up.
-- To RETRY a node that failed, call regenerate_node with that node's id (find it via list_canvas — it's the one with status=error). Re-run the SAME node; do not create a new node or animate a different node just to retry. Match node ids to the right type: image nodes are type "imagegen", videos "videogen", music "musicgen".
+- To RETRY a node that failed, call regenerate_node with that node's id (find it via list_canvas — it's the one with status=error). Re-run the SAME node; do not create a new node or animate a different node just to retry.
+- Node ids encode their kind, so you can tell them apart at a glance: img* = image, vid* = video, mus* = music, film* = stitched film (older nodes may be n*; the [type] in list_canvas is authoritative). So to animate an image, pass an img* (or [image]) node as from_node_id — never a vid*/[video] node.
 - Use describe_media to actually look at a result (e.g. to verify it, caption it, or write a better follow-up prompt).
 - To turn a multi-shot storyboard into a finished film, generate each shot as its own video, then call assemble_film with those node_ids — it joins them end-to-end into one continuous clip (and lays them on a Timeline). Use stitch_videos ONLY for side-by-side model comparisons, not for storyboard films.
 - Web tools (web_search/exa) are for references, facts, and inspiration. Filesystem/bash tools operate on the user's machine — use them when the task involves local files, ffmpeg, or project work.
@@ -688,10 +689,34 @@ export async function describeMedia({ imageUrl, question }, ctx) {
 
 // ── One agent turn ────────────────────────────────────────────────────────────
 
+// Guarantee valid OpenAI tool threading: every assistant tool_call is
+// immediately followed by its tool result (a stub if the real one is missing),
+// and orphan tool messages (no matching tool_call) are dropped. A malformed
+// thread — e.g. a generation that errored mid-flight, or a half-saved history —
+// otherwise makes the gateway reject the whole turn with a 400.
+function sanitizeMessages(messages) {
+  const msgs = (Array.isArray(messages) ? messages : []).filter(Boolean);
+  const toolById = new Map();
+  for (const m of msgs) if (m.role === 'tool' && m.tool_call_id) toolById.set(m.tool_call_id, m);
+  const out = [];
+  for (const m of msgs) {
+    if (m.role === 'tool') continue; // re-emitted right after its assistant below
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      out.push(m);
+      for (const c of m.tool_calls) {
+        out.push(toolById.get(c.id) || { role: 'tool', tool_call_id: c.id, name: c.function?.name, content: '(no result recorded)' });
+      }
+    } else {
+      out.push(m);
+    }
+  }
+  return out;
+}
+
 export async function runAgentChat({ model, messages }, ctx) {
   const client = llm(ctx);
   const planModel = model || 'anthropic/claude-sonnet-4.6';
-  const msgs = [{ role: 'system', content: AGENT_CHAT_SYSTEM }, ...(Array.isArray(messages) ? messages : [])];
+  const msgs = [{ role: 'system', content: AGENT_CHAT_SYSTEM }, ...sanitizeMessages(messages)];
   const resp = await client.chatCompletion(planModel, msgs, {
     tools: AGENT_TOOLS,
     toolChoice: 'auto',

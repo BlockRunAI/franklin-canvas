@@ -180,12 +180,16 @@ async function executeCanvasTool(name: string, input: Record<string, unknown>, {
     }
     case 'list_canvas': {
       const nodes = canvas.listCanvas();
-      if (!nodes.length) return 'The canvas is empty.';
-      return nodes.map((n) => {
-        const conn = n.from?.length ? ` ← from ${n.from.join(',')}` : '';
-        const out = n.to?.length ? ` → to ${n.to.join(',')}` : '';
-        return `- ${n.nodeId} [${n.type}] status=${n.status || 'idle'}${n.hasResult ? ` (has ${n.resultKind} result)` : ''}${conn}${out} "${n.title}" — ${n.prompt.slice(0, 60)}`;
-      }).join('\n');
+      if (!nodes.length) return 'Canvas graph — 0 nodes. The canvas is empty.';
+      const typeOf = new Map(nodes.map((n) => [n.nodeId, n.type]));
+      const ann = (ids?: string[]) => (ids || []).map((i) => `${i}[${typeOf.get(i) || '?'}]`).join(', ');
+      const edgeCount = nodes.reduce((s, n) => s + (n.to?.length || 0), 0);
+      const lines = nodes.map((n) => {
+        const from = n.from?.length ? ` ← from ${ann(n.from)}` : '';
+        const out = n.to?.length ? ` → to ${ann(n.to)}` : '';
+        return `- ${n.nodeId} [${n.type}] status=${n.status || 'idle'}${n.hasResult ? ` (has ${n.resultKind} result)` : ''}${from}${out} "${n.title}" — ${n.prompt.slice(0, 50)}`;
+      });
+      return `Canvas graph — ${nodes.length} nodes, ${edgeCount} edges:\n${lines.join('\n')}`;
     }
     case 'delete_node': {
       const ids = (input.node_ids as string[]) || [];

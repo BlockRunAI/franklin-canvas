@@ -41,6 +41,10 @@ const GATEWAY = process.env.BLOCKRUN_API_URL || 'https://blockrun.ai/api';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const JOBS_DIR = path.join(os.homedir(), '.franklin', 'web-jobs');
 fs.mkdirSync(JOBS_DIR, { recursive: true });
+// On-disk project files: each canvas (nodes+edges) is one JSON file on disk,
+// so projects are portable / version-controllable / editable outside the browser.
+const PROJECTS_DIR = path.join(os.homedir(), '.franklin', 'projects');
+fs.mkdirSync(PROJECTS_DIR, { recursive: true });
 
 // CORS — wide open in dev so any Vite port can talk to :3100. In production,
 // set ALLOWED_ORIGINS to a comma-separated list of origins (or "*" if you
@@ -221,6 +225,8 @@ async function signVideoPayment(response, endpoint, privateKey, address) {
 // identity on each poll and settles on the first completed response. (The SDK's
 // VideoClient.generate auto-poll omits this header → "Poll failed: HTTP 402".)
 async function generateVideo(body, jobId) {
+  const phaseT0 = Date.now();
+  const phase = {}; // submitMs / firstQueuedMs / firstProgressMs / completedMs / downloadMs
   const { privateKey, address } = getWallet();
   if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.');
   const model = body.model || 'bytedance/seedance-2.0';
@@ -261,6 +267,7 @@ async function generateVideo(body, jobId) {
   // polling. Settlement happens on the completed 200 response. (The SDK's
   // built-in poll throws on this 402, which is why we poll manually.)
   const startedAt = Date.now();
+  phase.submitMs = startedAt - phaseT0;
   const deadline = startedAt + 20 * 60 * 1000; // Seedance cinematic/pro can run long
   let remoteUrl;
   let polls = 0;
@@ -269,11 +276,13 @@ async function generateVideo(body, jobId) {
     const pr = await fetch(pollUrl, { headers: { ...headers, ...paymentHeaders } });
     let pj = {};
     if (pr.status === 200 || pr.status === 202) { pj = await pr.json().catch(() => ({})); }
+    if (pj.status === 'queued' && phase.firstQueuedMs == null) phase.firstQueuedMs = Date.now() - phaseT0;
+    if (pj.status === 'in_progress' && phase.firstProgressMs == null) phase.firstProgressMs = Date.now() - phaseT0;
     if (++polls % 3 === 0 || pr.status !== 202) {
       console.log(`[video poll #${polls}] http=${pr.status} status=${pj.status ?? '-'} t=${Math.round((Date.now() - startedAt) / 1000)}s`);
     }
     if (pr.status === 200 || pr.status === 202) {
-      if (pj.status === 'completed' && pj.data?.[0]?.url) { remoteUrl = pj.data[0].url; break; }
+      if (pj.status === 'completed' && pj.data?.[0]?.url) { remoteUrl = pj.data[0].url; phase.completedMs = Date.now() - phaseT0; break; }
       if (pj.status === 'failed') throw new Error(`Video failed upstream: ${JSON.stringify(pj.error || '').slice(0, 200)}`);
       // queued / in_progress → keep polling
     } else if (pr.status === 402) {
@@ -286,8 +295,17 @@ async function generateVideo(body, jobId) {
       throw new Error(`Poll failed (${pr.status}): ${t.slice(0, 200)}`);
     }
   }
-  if (!remoteUrl) throw new Error('Video generation timed out (no completion within 10min). No payment settled.');
+  const logPhases = (note) => {
+    try {
+      const f = path.join(os.homedir(), '.franklin', 'video-debug.log');
+      fs.appendFileSync(f, `[${new Date().toISOString()}] ${model} i2v=${body.imageUrl ? 'Y' : 'N'} dur=${body.durationS ?? '-'} polls=${polls} :: submit=${(phase.submitMs ?? 0) / 1000 | 0}s queued@${phase.firstQueuedMs != null ? (phase.firstQueuedMs / 1000 | 0) + 's' : '-'} progress@${phase.firstProgressMs != null ? (phase.firstProgressMs / 1000 | 0) + 's' : '-'} completed@${phase.completedMs != null ? (phase.completedMs / 1000 | 0) + 's' : '-'} total=${(Date.now() - phaseT0) / 1000 | 0}s :: ${note}\n`);
+    } catch { /* ignore */ }
+  };
+  if (!remoteUrl) { logPhases('TIMEOUT/no-completion'); throw new Error('Video generation timed out (no completion within 20min). No payment settled.'); }
+  const dlStart = Date.now();
   const { ext } = await downloadTo(remoteUrl, path.join(JOBS_DIR, jobId), 'mp4');
+  phase.downloadMs = Date.now() - dlStart;
+  logPhases(`OK download=${(phase.downloadMs / 1000) | 0}s`);
   const costUsd = body.durationS ? body.durationS * 0.2 : 0; // estimate for the spend log
   appendCostLog({ endpoint: '/v1/videos/generations', costUsd, model, wallet: address, kind: 'VideoClient' });
   return { resultUrl: `/api/generated/${jobId}.${ext}`, costUsd };
@@ -868,6 +886,7 @@ const server = http.createServer(async (req, res) => {
         return json(req, res, { ok: true, ...out });
       } catch (err) {
         console.warn(`[agent] chat FAIL: ${err.message || err}`);
+        try { fs.appendFileSync(path.join(os.homedir(), '.franklin', 'agent-debug.log'), `[${new Date().toISOString()}] CHAT FAIL model=${body.model || 'default'} :: ${(err.message || String(err)).slice(0, 400)}\n`); } catch { /* ignore */ }
         return json(req, res, { ok: false, error: err.message || String(err) }, 502);
       }
     }
@@ -991,6 +1010,33 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/health' && req.method === 'GET') {
       return json(req, res, { ok: true });
+    }
+
+    // ── Project files (on-disk canvas persistence) ──
+    if (p === '/api/projects' && req.method === 'GET') {
+      try {
+        const files = fs.existsSync(PROJECTS_DIR) ? fs.readdirSync(PROJECTS_DIR).filter((f) => f.endsWith('.json')) : [];
+        const projects = [];
+        for (const f of files) { try { projects.push(JSON.parse(fs.readFileSync(path.join(PROJECTS_DIR, f), 'utf8'))); } catch { /* skip corrupt */ } }
+        return json(req, res, { ok: true, projects });
+      } catch (err) { return json(req, res, { ok: false, error: String(err), projects: [] }, 500); }
+    }
+    if (p === '/api/projects/save' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body; try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      const pr = body.project;
+      if (!pr || !pr.id) return json(req, res, { ok: false, error: 'project.id required' }, 400);
+      const safe = String(pr.id).replace(/[^a-zA-Z0-9_-]/g, '');
+      if (!safe) return json(req, res, { ok: false, error: 'bad id' }, 400);
+      try { fs.writeFileSync(path.join(PROJECTS_DIR, `${safe}.json`), JSON.stringify(pr)); return json(req, res, { ok: true }); }
+      catch (err) { return json(req, res, { ok: false, error: String(err) }, 500); }
+    }
+    if (p === '/api/projects/delete' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body; try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      const safe = String(body.id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+      try { if (safe) fs.rmSync(path.join(PROJECTS_DIR, `${safe}.json`), { force: true }); return json(req, res, { ok: true }); }
+      catch (err) { return json(req, res, { ok: false, error: String(err) }, 500); }
     }
 
     if (p === '/api/prompts' && req.method === 'GET') {

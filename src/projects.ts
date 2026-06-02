@@ -42,6 +42,53 @@ function writeList(list: Project[]): void {
   try { localStorage.setItem(LIST_KEY, JSON.stringify(list)); } catch { /* ignore quota */ }
 }
 
+// ── On-disk mirror ──
+// localStorage stays the fast synchronous source for the running app; every
+// change is ALSO mirrored to a JSON file via the backend so projects survive a
+// cache clear, are portable, and can be inspected/edited outside the browser.
+// Fire-and-forget — the app never blocks on it and works offline (localStorage).
+function mirrorSave(p: Project): void {
+  try {
+    fetch('/api/projects/save', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project: p }),
+    }).catch(() => {});
+  } catch { /* ignore */ }
+}
+function mirrorDelete(id: string): void {
+  try {
+    fetch('/api/projects/delete', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }).catch(() => {});
+  } catch { /* ignore */ }
+}
+
+// Hydrate localStorage from the on-disk files at startup. Files win when newer
+// (so an external edit or a post-cache-clear recovery shows up); local-only
+// projects are kept and pushed to disk (first run seeds the files). Call once
+// before the canvas mounts; safe to fail (offline → localStorage only).
+export async function hydrateFromFiles(): Promise<void> {
+  try {
+    const r = await fetch('/api/projects');
+    if (!r.ok) return;
+    const data = await r.json().catch(() => ({}));
+    const fileProjects: Project[] = Array.isArray(data.projects) ? data.projects : [];
+    const local = readList();
+    if (fileProjects.length === 0) { local.forEach(mirrorSave); return; } // seed disk from localStorage
+    const byId = new Map<string, Project>(local.map((p) => [p.id, p]));
+    for (const fp of fileProjects) {
+      if (!fp || !fp.id) continue;
+      const lp = byId.get(fp.id);
+      if (!lp || (fp.updatedAt || 0) >= (lp.updatedAt || 0)) byId.set(fp.id, fp);
+    }
+    // Push any local-only projects (not yet on disk) to disk.
+    const fileIds = new Set(fileProjects.map((p) => p && p.id));
+    local.forEach((p) => { if (!fileIds.has(p.id)) mirrorSave(p); });
+    writeList([...byId.values()]);
+  } catch { /* offline / backend down → localStorage only */ }
+}
+
 // One-time migration: if the old single-canvas keys exist and no projects do,
 // fold them into a starter project so a returning user keeps their canvas.
 function migrateLegacy(): Project[] {
@@ -110,16 +157,20 @@ export function createProject(name = 'Untitled project', seed?: { nodes: Node[];
   };
   writeList([p, ...readList()]);
   setCurrentId(p.id);
+  mirrorSave(p);
   return p;
 }
 
 export function renameProject(id: string, name: string): void {
-  writeList(readList().map((p) => (p.id === id ? { ...p, name, updatedAt: Date.now() } : p)));
+  let updated: Project | undefined;
+  writeList(readList().map((p) => (p.id === id ? (updated = { ...p, name, updatedAt: Date.now() }) : p)));
+  if (updated) mirrorSave(updated);
 }
 
 export function deleteProject(id: string): void {
   const next = readList().filter((p) => p.id !== id);
   writeList(next);
+  mirrorDelete(id);
   if (getCurrentId() === id) {
     if (next.length > 0) setCurrentId([...next].sort((a, b) => b.updatedAt - a.updatedAt)[0].id);
     else localStorage.removeItem(CURRENT_KEY);
@@ -128,5 +179,7 @@ export function deleteProject(id: string): void {
 
 /** Persist canvas content into a project. Called debounced by the canvas. */
 export function saveProjectCanvas(id: string, nodes: Node[], edges: Edge[]): void {
-  writeList(readList().map((p) => (p.id === id ? { ...p, nodes, edges, updatedAt: Date.now() } : p)));
+  let updated: Project | undefined;
+  writeList(readList().map((p) => (p.id === id ? (updated = { ...p, nodes, edges, updatedAt: Date.now() }) : p)));
+  if (updated) mirrorSave(updated);
 }

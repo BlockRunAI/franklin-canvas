@@ -178,9 +178,35 @@ function CanvasInner() {
   const bgDotColor = theme === 'dark' ? '#222' : theme === 'gold' ? '#d8d2c6' : '#e0e0dd';
   const minimapMask = theme === 'dark' ? 'rgba(7,7,10,0.85)' : 'rgba(255,255,255,0.7)';
   const connectStartFrom = useRef<string | null>(null);
-  const idCounter = useRef(100);
+  // Start the id counter ABOVE the highest id already on the loaded canvas —
+  // otherwise after a reload it resets to 100 and new nodes collide with
+  // persisted nodes (n100, n101…), overwriting them (and creating self-edges).
+  const idCounter = useRef(
+    project.nodes.reduce((max, n) => {
+      const num = parseInt(String(n.id).replace(/^\D+/, ''), 10);
+      return Number.isFinite(num) && num > max ? num : max;
+    }, 99) + 1,
+  );
   const agentColIdx = useRef(0); // vertical position of the next standalone agent node
   const { screenToFlowPosition, getNode, getNodes, getEdges, fitView } = useReactFlow();
+  // Collision-proof id: skip any id already present on the canvas.
+  const nextId = useCallback((): string => {
+    let id: string;
+    do { id = `n${idCounter.current++}`; } while (getNode(id));
+    return id;
+  }, [getNode]);
+  // Type-prefixed, collision-proof ids for AGENT-created nodes (img1/vid2/mus1/
+  // film1/tl1). Encoding the kind in the id helps the LLM never mistake an image
+  // node for a video one (the id encodes the kind). Counters are per-prefix.
+  const typedCounters = useRef<Record<string, number>>({});
+  const nextTypedId = useCallback((prefix: string): string => {
+    let id: string;
+    do {
+      typedCounters.current[prefix] = (typedCounters.current[prefix] ?? 0) + 1;
+      id = `${prefix}${typedCounters.current[prefix]}`;
+    } while (getNode(id));
+    return id;
+  }, [getNode]);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge({ ...params, type: 'flow' }, eds)),
@@ -279,7 +305,7 @@ function CanvasInner() {
         reader.onload = () => {
           const dataUrl = reader.result as string;
           const flow = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-          const id = `n${idCounter.current++}`;
+          const id = nextId();
           const newNode: Node = {
             id,
             type: 'upload',
@@ -320,7 +346,7 @@ function CanvasInner() {
 
   const createConnectedNode = (type: string, defaultData: Record<string, unknown>) => {
     if (!pending) return;
-    const id = `n${idCounter.current++}`;
+    const id = nextId();
     const isGroup = type === 'group';
 
     const GAP = 80;
@@ -371,7 +397,7 @@ function CanvasInner() {
   };
 
   const addNodeFromDrawer = (entry: NodeCatalogEntry) => {
-    const id = `n${idCounter.current++}`;
+    const id = nextId();
     const x = 380 + Math.random() * 200;
     const y = 200 + Math.random() * 150;
     const isGroup = entry.type === 'group';
@@ -392,7 +418,7 @@ function CanvasInner() {
     const wantsVideo = workflow === 'text2video' || workflow === 'image2video';
     const targetType = wantsVideo ? 'videogen' : 'imagegen';
     const entry = NODE_CATALOG.find((e) => e.type === targetType);
-    const id = `n${idCounter.current++}`;
+    const id = nextId();
     const x = 380 + Math.random() * 200;
     const y = 200 + Math.random() * 150;
     const newNode: Node = {
@@ -410,7 +436,7 @@ function CanvasInner() {
   // each pre-filled with the saved result so it shows immediately.
   const importFavorite = (item: FavItem) => {
     const type = item.kind === 'image' ? 'upload' : item.kind === 'video' ? 'videogen' : 'musicgen';
-    const id = `n${idCounter.current++}`;
+    const id = nextId();
     const x = 380 + Math.random() * 200;
     const y = 200 + Math.random() * 150;
     const data = item.kind === 'image'
@@ -589,7 +615,7 @@ function CanvasInner() {
     }
     const entry = NODE_CATALOG.find((e) => e.type === payload.mode);
     if (!entry) return;
-    const id = `n${idCounter.current++}`;
+    const id = nextId();
     const x = 380 + Math.random() * 200;
     const y = 200 + Math.random() * 150;
     const newNode: Node = {
@@ -620,7 +646,7 @@ function CanvasInner() {
     const sourceImage = sd.resultUrl || sd.imageUrl;
     if (!sourceImage) return;
 
-    const id = `n${idCounter.current++}`;
+    const id = nextId();
     const NEW_W = 280, NEW_H = 280, GAP = 80;
     const srcW = (src.measured?.width ?? src.width ?? NEW_W);
     const srcH = (src.measured?.height ?? src.height ?? NEW_H);
@@ -685,7 +711,7 @@ function CanvasInner() {
           let url: string;
           try { url = canvas.toDataURL('image/png'); }
           catch { return; } // tainted canvas (cross-origin without CORS) — bail
-          const id = `n${idCounter.current++}`;
+          const id = nextId();
           newNodes.push({
             id,
             type: 'upload',
@@ -732,7 +758,7 @@ function CanvasInner() {
         const rd = getNode(refId)?.data as { resultUrl?: string; imageUrl?: string } | undefined;
         refUrl = rd?.resultUrl || rd?.imageUrl;
       }
-      const id = `n${idCounter.current++}`;
+      const id = nextTypedId(kind === 'imagegen' ? 'img' : kind === 'videogen' ? 'vid' : 'mus');
       // Don't trust the agent's model id blindly — it sometimes picks a model
       // from the wrong family (e.g. an image model for a video). Validate against
       // the catalog for this kind; fall back to the user's configured default.
@@ -766,7 +792,7 @@ function CanvasInner() {
       if (!items.length) return { ok: false, error: 'none of those nodes has a finished video' };
       const r = await stitchComparison(items, mode, orientation);
       if (!r.ok) return { ok: false, error: r.error };
-      const id = `n${idCounter.current++}`;
+      const id = nextTypedId('film');
       const newNode: Node = {
         id, type: 'videogen', position: placeAgentNode(nodeIds[0]),
         data: { title: 'Stitched', model: 'ffmpeg', prompt: `Combined ${items.length} clips (${mode}/${orientation})`, status: 'done' as NodeStatus, resultUrl: r.resultUrl, progress: 1 },
@@ -791,13 +817,13 @@ function CanvasInner() {
       // The continuous film (a done video node) + a Timeline of the source clips
       // (so the user can re-order / trim and re-export).
       const pos = placeAgentNode(nodeIds[0]);
-      const filmId = `n${idCounter.current++}`;
+      const filmId = nextTypedId('film');
       const filmNode: Node = {
         id: filmId, type: 'videogen', position: pos,
         data: { title: title || 'Film', model: 'ffmpeg', prompt: `Assembled ${items.length} clips`, status: 'done' as NodeStatus, resultUrl: r.resultUrl, progress: 1 },
       };
       const tlNode: Node = {
-        id: `n${idCounter.current++}`, type: 'timeline', position: { x: pos.x, y: pos.y + 320 },
+        id: nextTypedId('tl'), type: 'timeline', position: { x: pos.x, y: pos.y + 320 },
         data: { title: title ? `${title} · timeline` : 'Film timeline', clips },
       };
       setNodes((nds) => [...nds, filmNode, tlNode]);
@@ -876,7 +902,7 @@ function CanvasInner() {
     const NEW_W = 280, NEW_H = 280, GAP = 80;
     const srcW = (src.measured?.width ?? src.width ?? NEW_W);
     const srcH = (src.measured?.height ?? src.height ?? NEW_H);
-    const id = `n${idCounter.current++}`;
+    const id = nextId();
     const newNode: Node = {
       id,
       type: 'upload',
