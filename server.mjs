@@ -195,8 +195,9 @@ async function generateMusic(body, jobId) {
   return { resultUrl: `/api/generated/${jobId}.${ext}`, costUsd };
 }
 
-// Sign an x402 payment-required response into a PAYMENT-SIGNATURE header.
-async function signVideoPayment(response, endpoint, privateKey, address) {
+// Pull the x402 payment-required challenge out of a 402 response (header, or the
+// JSON body for gateways that put it there). Returns a base64 challenge string.
+async function extractChallengeHeader(response) {
   let header = response.headers.get('payment-required');
   if (!header) {
     try {
@@ -204,8 +205,17 @@ async function signVideoPayment(response, endpoint, privateKey, address) {
       if (b.x402 || b.accepts) header = Buffer.from(JSON.stringify(b)).toString('base64');
     } catch { /* ignore */ }
   }
-  if (!header) return null;
-  const paymentRequired = parsePaymentRequired(header);
+  return header || null;
+}
+
+// Sign a stored challenge into a FRESH PAYMENT-SIGNATURE header. Re-signing from
+// the original (submit) challenge gives a new validity window each time, which is
+// what fixes the long-video 402 loop: the gateway's "verification failed" 402
+// (on an expired authorization) ships NO new challenge, so we must re-sign from
+// the one we captured at submit time.
+async function signChallenge(challengeHeader, endpoint, privateKey, address) {
+  if (!challengeHeader) return null;
+  const paymentRequired = parsePaymentRequired(challengeHeader);
   const details = extractPaymentDetails(paymentRequired);
   const payload = await createPaymentPayload(
     privateKey, address, details.recipient, details.amount,
@@ -218,6 +228,11 @@ async function signVideoPayment(response, endpoint, privateKey, address) {
     },
   );
   return { 'PAYMENT-SIGNATURE': payload };
+}
+
+// Sign an x402 payment-required response into a PAYMENT-SIGNATURE header.
+async function signVideoPayment(response, endpoint, privateKey, address) {
+  return signChallenge(await extractChallengeHeader(response), endpoint, privateKey, address);
 }
 
 // Video uses async submit + poll. CRITICAL: the signed PAYMENT-SIGNATURE header
@@ -245,8 +260,10 @@ async function generateVideo(body, jobId) {
   // Phase 1: submit (first POST → 402 → sign → retry with payment header).
   let resp = await fetch(endpoint, { method: 'POST', headers, body: reqBody });
   let paymentHeaders = null;
+  let submitChallenge = null; // kept so we can re-sign a fresh auth on each poll-402
   if (resp.status === 402) {
-    paymentHeaders = await signVideoPayment(resp, endpoint, privateKey, address);
+    submitChallenge = await extractChallengeHeader(resp);
+    paymentHeaders = await signChallenge(submitChallenge, endpoint, privateKey, address);
     if (!paymentHeaders) throw new Error('Payment signing failed — check wallet balance.');
     resp = await fetch(endpoint, { method: 'POST', headers: { ...headers, ...paymentHeaders }, body: reqBody });
   }
@@ -269,8 +286,16 @@ async function generateVideo(body, jobId) {
   const startedAt = Date.now();
   phase.submitMs = startedAt - phaseT0;
   const deadline = startedAt + 20 * 60 * 1000; // Seedance cinematic/pro can run long
+  const logPhases = (note) => {
+    try {
+      const f = path.join(os.homedir(), '.franklin', 'video-debug.log');
+      fs.appendFileSync(f, `[${new Date().toISOString()}] ${model} i2v=${body.imageUrl ? 'Y' : 'N'} dur=${body.durationS ?? '-'} polls=${polls} :: submit=${(phase.submitMs ?? 0) / 1000 | 0}s queued@${phase.firstQueuedMs != null ? (phase.firstQueuedMs / 1000 | 0) + 's' : '-'} progress@${phase.firstProgressMs != null ? (phase.firstProgressMs / 1000 | 0) + 's' : '-'} completed@${phase.completedMs != null ? (phase.completedMs / 1000 | 0) + 's' : '-'} total=${(Date.now() - phaseT0) / 1000 | 0}s :: ${note}\n`);
+    } catch { /* ignore */ }
+  };
   let remoteUrl;
   let polls = 0;
+  let consec402 = 0; // consecutive failed-verification polls
+  let last402 = '';
   while (Date.now() < deadline) {
     await sleep(5000);
     const pr = await fetch(pollUrl, { headers: { ...headers, ...paymentHeaders } });
@@ -282,12 +307,21 @@ async function generateVideo(body, jobId) {
       console.log(`[video poll #${polls}] http=${pr.status} status=${pj.status ?? '-'} t=${Math.round((Date.now() - startedAt) / 1000)}s`);
     }
     if (pr.status === 200 || pr.status === 202) {
+      consec402 = 0;
       if (pj.status === 'completed' && pj.data?.[0]?.url) { remoteUrl = pj.data[0].url; phase.completedMs = Date.now() - phaseT0; break; }
-      if (pj.status === 'failed') throw new Error(`Video failed upstream: ${JSON.stringify(pj.error || '').slice(0, 200)}`);
+      if (pj.status === 'failed') { logPhases('upstream-failed'); throw new Error(`Video failed upstream: ${JSON.stringify(pj.error || '').slice(0, 200)}`); }
       // queued / in_progress → keep polling
     } else if (pr.status === 402) {
-      const re = await signVideoPayment(pr, endpoint, privateKey, address);
+      consec402++;
+      last402 = (await pr.text().catch(() => '')).slice(0, 300);
+      // The poll's "verification failed" 402 ships NO fresh challenge, so re-sign
+      // from the SUBMIT challenge — that gives a new validity window each time, so
+      // a long-running job's authorization never lapses into a permanent 402 loop.
+      const re = await signChallenge(submitChallenge, endpoint, privateKey, address);
       if (re) paymentHeaders = re;
+      // Fast-fail: if verification still fails after re-signing repeatedly (~1min),
+      // bail with the gateway's reason instead of spinning to the 20-min deadline.
+      if (consec402 >= 12) { logPhases(`402-LOOP ${last402}`); throw new Error(`Payment kept failing verification on poll (402 ×${consec402}); no payment taken. Gateway: ${last402}`); }
     } else if (pr.status === 429 || pr.status >= 500) {
       // transient → keep polling
     } else {
@@ -295,12 +329,6 @@ async function generateVideo(body, jobId) {
       throw new Error(`Poll failed (${pr.status}): ${t.slice(0, 200)}`);
     }
   }
-  const logPhases = (note) => {
-    try {
-      const f = path.join(os.homedir(), '.franklin', 'video-debug.log');
-      fs.appendFileSync(f, `[${new Date().toISOString()}] ${model} i2v=${body.imageUrl ? 'Y' : 'N'} dur=${body.durationS ?? '-'} polls=${polls} :: submit=${(phase.submitMs ?? 0) / 1000 | 0}s queued@${phase.firstQueuedMs != null ? (phase.firstQueuedMs / 1000 | 0) + 's' : '-'} progress@${phase.firstProgressMs != null ? (phase.firstProgressMs / 1000 | 0) + 's' : '-'} completed@${phase.completedMs != null ? (phase.completedMs / 1000 | 0) + 's' : '-'} total=${(Date.now() - phaseT0) / 1000 | 0}s :: ${note}\n`);
-    } catch { /* ignore */ }
-  };
   if (!remoteUrl) { logPhases('TIMEOUT/no-completion'); throw new Error('Video generation timed out (no completion within 20min). No payment settled.'); }
   const dlStart = Date.now();
   const { ext } = await downloadTo(remoteUrl, path.join(JOBS_DIR, jobId), 'mp4');
