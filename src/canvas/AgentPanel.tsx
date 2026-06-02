@@ -364,7 +364,8 @@ export default function AgentPanel({ open, onClose, api }: Props) {
                     </button>
                   ))}
                   <div className="agent-opts-label">Agent model</div>
-                  <ModelDropdown models={TEXT_MODELS.map((m) => ({ id: m.id, label: m.label }))} value={model} onChange={setModel} />
+                  {/* Agent needs tool calling — hide models that can't do it. */}
+                  <ModelDropdown models={TEXT_MODELS.filter((m) => m.tools !== false).map((m) => ({ id: m.id, label: m.label }))} value={model} onChange={setModel} />
                 </div>
               </>
             )}

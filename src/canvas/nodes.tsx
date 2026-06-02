@@ -70,7 +70,10 @@ export const MUSIC_MODELS = [
 // per 1k tokens (blended ~50/50 input/output for display purposes; real cost
 // depends on actual prompt + completion size). Gateway IDs use dots, not
 // hyphens (e.g. claude-opus-4.7) — getting that wrong means a 404 at send.
-export const TEXT_MODELS = [
+// `tools: false` marks a model that can't reliably do function calling — it's
+// fine for the Text node (plain chat) but hidden from the Agent model picker
+// (the Agent needs tool calls to actually build things).
+export const TEXT_MODELS: { id: string; label: string; priceK: number; tools?: boolean }[] = [
   { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', priceK: 0.003 },
   { id: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', priceK: 0.009 },
   { id: 'anthropic/claude-opus-4.7', label: 'Claude Opus 4.7', priceK: 0.015 },
@@ -79,6 +82,12 @@ export const TEXT_MODELS = [
   { id: 'google/gemini-3.1-pro', label: 'Gemini 3.1 Pro', priceK: 0.007 },
   { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', priceK: 0.0014 },
   { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', priceK: 0.00075 },
+  // Free (NVIDIA-hosted). Great for the Text node; usable as an Agent model only
+  // if they support tool calling — verified before listing.
+  // Flash emits tool calls as <tool_call> text the gateway doesn't yet parse into
+  // structured tool_calls, so it can't drive the Agent — Text node only for now.
+  { id: 'nvidia/deepseek-v4-flash', label: 'DeepSeek V4 Flash · Free', priceK: 0, tools: false },
+  { id: 'nvidia/qwen3.5-397b-a17b', label: 'Qwen3.5 397B · Free', priceK: 0 },
 ];
 
 // ── Helpers ──
