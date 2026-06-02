@@ -35,6 +35,16 @@ export interface CanvasCtx {
    * the source. Pure client-side, no model call, no spend.
    */
   runAnnotate: (fromNodeId: string) => void;
+  /**
+   * Render a timeline node's ordered (and possibly trimmed) clips into one
+   * continuous film via server-side ffmpeg concat, spawning a finished video
+   * node below the timeline. `clips` carry per-clip trim (inS / durationS).
+   * Pure local ffmpeg — no model call, no spend.
+   */
+  exportTimeline: (
+    timelineNodeId: string,
+    clips: { url: string; kind: 'video' | 'audio'; inS?: number; durationS?: number }[],
+  ) => void;
 }
 
 export const CanvasContext = createContext<CanvasCtx>({
@@ -42,6 +52,7 @@ export const CanvasContext = createContext<CanvasCtx>({
   runImageEdit: () => {},
   runImageSplit: () => {},
   runAnnotate: () => {},
+  exportTimeline: () => {},
 });
 
 export const useCanvasCtx = () => useContext(CanvasContext);

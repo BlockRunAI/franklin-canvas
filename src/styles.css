@@ -2601,15 +2601,22 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
   color: var(--fg-faint); font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
+.timeline-export {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-left: 10px; padding: 4px 10px; border-radius: 7px;
+  border: 1px solid var(--accent-ring); background: var(--accent-bg);
+  color: var(--accent); font-size: 11px; font-weight: 650; cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
+}
+.timeline-export:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent); }
+.timeline-export:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .timeline-track {
-  position: relative; padding: 22px 12px 0;
+  position: relative; padding: 22px 12px 12px;
   background: transparent;
   border-radius: 14px;
   overflow: visible;
-  cursor: grab;
 }
-.timeline-track:active { cursor: grabbing; }
 
 .timeline-ruler {
   position: relative; height: 14px; margin-bottom: 6px;
@@ -2628,13 +2635,17 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
   transform: translateX(-50%);
 }
 
-.timeline-strip {
-  position: relative; height: 84px;
+/* A lane is one horizontal track (video on top, music below). Clips are
+   absolutely placed inside it on the shared time axis. */
+.timeline-lane {
+  position: relative;
   background: var(--panel-soft);
   border-radius: 10px;
   border: 1px dashed var(--panel-border);
   overflow: visible;
 }
+.timeline-lane-video { height: 84px; }
+.timeline-lane-audio { height: 40px; margin-top: 6px; background: rgba(163,230,53,0.05); }
 
 .timeline-empty-pop {
   position: absolute; inset: 0;
@@ -2642,7 +2653,7 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
   gap: 14px;
 }
 .timeline-empty-plus {
-  width: 48px; height: 48px; border-radius: 12px;
+  width: 46px; height: 46px; border-radius: 12px;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--panel-soft); border: 1px solid var(--panel-border);
   color: var(--fg-dim); cursor: pointer;
@@ -2657,14 +2668,19 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
   border-radius: 8px; overflow: hidden;
   background: var(--bg-elevated); border: 1px solid var(--accent-ring);
   box-shadow: 0 2px 6px rgba(0,0,0,0.18);
-  transition: transform 0.14s ease, box-shadow 0.14s ease;
+  cursor: grab;
+  user-select: none; touch-action: none;
+  transition: box-shadow 0.14s ease, border-color 0.14s ease;
 }
-.timeline-block:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.25); border-color: var(--accent); }
+.timeline-block:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.25); border-color: var(--accent); z-index: 3; }
+.timeline-block.is-dragging { cursor: grabbing; box-shadow: 0 8px 20px rgba(0,0,0,0.4); border-color: var(--accent); z-index: 5; opacity: 0.92; }
 .timeline-block.is-audio { background: var(--accent-bg); }
+.timeline-lane-audio .timeline-block { flex-direction: row; align-items: center; }
 .timeline-block-thumb {
   width: 100%; flex: 1; object-fit: cover;
-  background: #0c0c0e; min-height: 0;
+  background: #0c0c0e; min-height: 0; pointer-events: none;
 }
+.timeline-lane-audio .timeline-block-thumb { width: 24px; flex: 0 0 24px; height: 100%; }
 .timeline-block-audio { display: flex; align-items: center; justify-content: center; color: var(--accent); }
 .timeline-block-meta {
   display: flex; align-items: center; gap: 5px;
@@ -2672,16 +2688,18 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
   font-size: 10px; color: rgba(255,255,255,0.85);
   font-variant-numeric: tabular-nums;
 }
+.timeline-lane-audio .timeline-block-meta { flex: 1; background: transparent; }
 .timeline-block-idx {
   display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 4px;
   background: var(--accent); color: #0c0c0d; font-weight: 700;
-  font-size: 9px;
+  font-size: 9px; flex-shrink: 0;
 }
 .timeline-block-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.timeline-block-dur { color: rgba(255,255,255,0.55); }
+.timeline-block-dur { color: rgba(255,255,255,0.55); flex-shrink: 0; }
+.timeline-lane-audio .timeline-block-dur { color: var(--fg-faint); }
 .timeline-block-x {
-  position: absolute; top: 4px; right: 4px; z-index: 2;
+  position: absolute; top: 4px; right: 8px; z-index: 4;
   width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px;
   background: rgba(20,20,24,0.78); color: #fff;
   display: inline-flex; align-items: center; justify-content: center;
@@ -2690,6 +2708,23 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 }
 .timeline-block:hover .timeline-block-x { opacity: 1; }
 .timeline-block-x:hover { background: rgba(220,38,38,0.92); }
+
+/* Trim handles — grab the left/right edge to shorten/lengthen a clip. */
+.timeline-trim {
+  position: absolute; top: 0; bottom: 0; width: 9px; z-index: 4;
+  cursor: ew-resize; opacity: 0;
+  background: var(--accent);
+  transition: opacity 0.12s ease;
+}
+.timeline-trim::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px; height: 40%; border-radius: 2px; background: #0c0c0d;
+}
+.timeline-trim-l { left: 0; border-radius: 8px 0 0 8px; }
+.timeline-trim-r { right: 0; border-radius: 0 8px 8px 0; }
+.timeline-block:hover .timeline-trim,
+.timeline-block.is-dragging .timeline-trim { opacity: 0.9; }
 
 .timeline-add-floating {
   position: absolute; right: 14px; top: 22px; bottom: 12px;

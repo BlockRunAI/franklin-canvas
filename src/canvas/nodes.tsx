@@ -708,15 +708,28 @@ export function GroupNode({ data, id, selected }: NodeProps) {
 // Each clip lays down on a real time ruler based on its duration so the
 // overall length is visible at a glance, like a non-destructive NLE
 // timeline.
-interface TimelineClip { id: string; url: string; kind: 'video' | 'audio'; label: string; durationS: number; }
+interface TimelineClip {
+  id: string;
+  url: string;
+  kind: 'video' | 'audio';
+  label: string;
+  durationS: number;      // length kept on the timeline (after trimming)
+  srcDurationS?: number;  // full source length — the cap when trimming back out
+  inS?: number;           // trim-in: seconds into the source where this clip starts
+}
 
 // Track length the ruler renders to: the bigger of the actual clip total
-// or this floor. Empty timeline still reads "0:00 → 1:00", which lets
+// or this floor. Empty timeline still reads "0:00 → 0:30", which lets
 // users size the picker before they have any clips on it.
-const TIMELINE_MIN_DURATION = 60;
-// Pixels per second on the visible track. Tuned so a 60s timeline is
-// roughly the width of a generous canvas card (~960px).
-const TIMELINE_PX_PER_SEC = 16;
+const TIMELINE_MIN_DURATION = 30;
+// Pixels per second on the visible track. Tuned so the track reads like a
+// real NLE — wide enough that sub-second trims feel precise.
+const TIMELINE_PX_PER_SEC = 20;
+// Smallest a clip can be trimmed to (seconds).
+const TIMELINE_MIN_CLIP = 0.5;
+
+const round1 = (v: number) => Math.round(v * 10) / 10;
+const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 function formatMmSs(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -724,13 +737,35 @@ function formatMmSs(seconds: number): string {
   const ss = String(s % 60).padStart(2, '0');
   return `${mm}:${ss}`;
 }
+// Short clock for clip chips: drop the leading 0 minutes when under a minute
+// (e.g. 4.0s → "4.0s", 72.5s → "1:12").
+function formatClip(seconds: number): string {
+  const s = Math.max(0, seconds);
+  if (s < 60) return `${s.toFixed(1)}s`;
+  return formatMmSs(s);
+}
+
+type DragMode = 'move' | 'trim-l' | 'trim-r';
 
 export function TimelineNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
   const d = data as { title?: string; clips?: TimelineClip[] };
   const clips = d.clips ?? [];
   const { updateNodeData } = useReactFlow();
+  const { exportTimeline } = useCanvasCtx();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+
+  // React Flow scales the DOM via a CSS transform, so screen-pixel deltas must
+  // be divided by the zoom to recover canvas pixels (→ seconds). Read it live.
+  const zoom = useStore((s) => s.transform[2]);
+
+  // Latest clips snapshot for pointer handlers (updateNodeData has no functional
+  // form, so handlers read/write against this ref to avoid stale closures).
+  const clipsRef = useRef(clips);
+  clipsRef.current = clips;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
   // Pull every finished video/music clip from the canvas, capturing each
   // source node's durationS so the track can lay them out proportionally.
@@ -747,61 +782,187 @@ export function TimelineNode({ data, id }: NodeProps) {
     return out;
   });
 
-  const total = clips.reduce((acc, c) => acc + (c.durationS || 0), 0);
-  // Round track length up to the next 10s so the ruler always ends on a
-  // clean tick (e.g. 47s of clips → 50s track, 63s → 70s).
-  const trackSeconds = Math.max(TIMELINE_MIN_DURATION, Math.ceil(total / 10) * 10);
+  const videoClips = clips.filter((c) => c.kind === 'video');
+  const audioClips = clips.filter((c) => c.kind === 'audio');
+  const videoTotal = videoClips.reduce((a, c) => a + (c.durationS || 0), 0);
+  const audioTotal = audioClips.reduce((a, c) => a + (c.durationS || 0), 0);
+  const total = Math.max(videoTotal, audioTotal);
+  // Round track length up to the next 5s so the ruler ends on a clean tick.
+  const trackSeconds = Math.max(TIMELINE_MIN_DURATION, Math.ceil(total / 5) * 5);
   const trackWidthPx = trackSeconds * TIMELINE_PX_PER_SEC;
+  const tickStep = trackSeconds > 60 ? 10 : 5;
   const ticks: number[] = [];
-  for (let t = 0; t <= trackSeconds; t += 10) ticks.push(t);
+  for (let t = 0; t <= trackSeconds; t += tickStep) ticks.push(t);
 
   const setClips = (next: TimelineClip[]) => updateNodeData(id, { clips: next });
   const addClip = (c: TimelineClip) => {
-    setClips([...clips, { ...c, id: `${c.id}-${Date.now()}` }]);
+    const src = c.durationS || 0;
+    setClips([...clipsRef.current, { ...c, id: `${c.id}-${Date.now()}`, srcDurationS: c.srcDurationS ?? src, inS: 0, durationS: src }]);
     setPickerOpen(false);
   };
-  const removeClip = (i: number) => setClips(clips.filter((_, idx) => idx !== i));
+  const removeClip = (cid: string) => setClips(clipsRef.current.filter((c) => c.id !== cid));
 
-  // Cumulative offsets used to position each clip block on the track.
-  let offset = 0;
-  const placed = clips.map((c) => {
-    const x = offset;
-    offset += c.durationS || 0;
-    return { ...c, leftPx: x * TIMELINE_PX_PER_SEC, widthPx: Math.max(20, (c.durationS || 0) * TIMELINE_PX_PER_SEC) };
-  });
+  // Lay a lane out left→right by cumulative trimmed duration (canvas px).
+  const layout = (lane: TimelineClip[]) => {
+    let off = 0;
+    return lane.map((c) => {
+      const left = off * TIMELINE_PX_PER_SEC;
+      const width = Math.max(14, (c.durationS || 0) * TIMELINE_PX_PER_SEC);
+      off += c.durationS || 0;
+      return { ...c, leftPx: left, widthPx: width };
+    });
+  };
+  const placedVideo = layout(videoClips);
+  const placedAudio = layout(audioClips);
+
+  // Rebuild the global clips array after reordering one lane, leaving the other
+  // lane's clips in their original slots.
+  const applyLaneOrder = (kind: 'video' | 'audio', laneOrder: TimelineClip[]) => {
+    const q = [...laneOrder];
+    return clipsRef.current.map((c) => (c.kind === kind ? (q.shift() as TimelineClip) : c));
+  };
+  const patchClip = (cid: string, patch: Partial<TimelineClip>) =>
+    setClips(clipsRef.current.map((c) => (c.id === cid ? { ...c, ...patch } : c)));
+
+  // Pointer-driven drag: body = reorder within lane, edges = trim in/out. Done
+  // on window listeners so the gesture survives leaving the small handle.
+  const startDrag = (e: React.PointerEvent, clip: TimelineClip, mode: DragMode) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const kind = clip.kind;
+    const startX = e.clientX;
+    const origIn = clip.inS ?? 0;
+    const origDur = clip.durationS || 0;
+    const srcDur = clip.srcDurationS ?? origDur;
+    setDragId(clip.id);
+    let moved = false;
+
+    const secAt = (ev: PointerEvent) => ((ev.clientX - startX) / (TIMELINE_PX_PER_SEC * (zoomRef.current || 1)));
+
+    const onMove = (ev: PointerEvent) => {
+      const dSec = secAt(ev);
+      if (mode === 'trim-r') {
+        const nd = clampN(round1(origDur + dSec), TIMELINE_MIN_CLIP, Math.max(TIMELINE_MIN_CLIP, srcDur - origIn));
+        patchClip(clip.id, { durationS: nd });
+      } else if (mode === 'trim-l') {
+        const nIn = clampN(round1(origIn + dSec), 0, origIn + origDur - TIMELINE_MIN_CLIP);
+        patchClip(clip.id, { inS: nIn, durationS: round1(origDur - (nIn - origIn)) });
+      } else {
+        // Reorder: find where the dragged clip's new center lands among the
+        // lane's clip widths, then splice it there.
+        moved = true;
+        const lane = clipsRef.current.filter((c) => c.kind === kind);
+        const from = lane.findIndex((c) => c.id === clip.id);
+        if (from < 0) return;
+        // Cumulative left edges of the lane in canvas px.
+        let acc = 0;
+        const lefts = lane.map((c) => { const l = acc; acc += (c.durationS || 0) * TIMELINE_PX_PER_SEC; return l; });
+        const draggedLeft = lefts[from] + (ev.clientX - startX) / (zoomRef.current || 1);
+        const center = draggedLeft + ((clip.durationS || 0) * TIMELINE_PX_PER_SEC) / 2;
+        let to = 0;
+        for (let i = 0; i < lane.length; i++) {
+          const mid = lefts[i] + ((lane[i].durationS || 0) * TIMELINE_PX_PER_SEC) / 2;
+          if (center > mid) to = i; else break;
+        }
+        if (to !== from) {
+          const next = [...lane];
+          const [m] = next.splice(from, 1);
+          next.splice(to, 0, m);
+          setClips(applyLaneOrder(kind, next));
+        }
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setDragId(null);
+      void moved;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const renderBlock = (c: ReturnType<typeof layout>[number], i: number) => (
+    <div
+      key={c.id}
+      className={`timeline-block ${c.kind === 'audio' ? 'is-audio' : ''} ${dragId === c.id ? 'is-dragging' : ''}`}
+      style={{ left: c.leftPx, width: c.widthPx }}
+      title={`${c.label} · ${formatClip(c.durationS)}`}
+      onPointerDown={(e) => startDrag(e, c, 'move')}
+    >
+      <span
+        className="timeline-trim timeline-trim-l nodrag"
+        onPointerDown={(e) => startDrag(e, c, 'trim-l')}
+        aria-label="Trim start"
+      />
+      {c.kind === 'video' ? (
+        <video src={c.url} preload="metadata" muted className="timeline-block-thumb" />
+      ) : (
+        <div className="timeline-block-thumb timeline-block-audio"><Music size={16} aria-hidden /></div>
+      )}
+      <div className="timeline-block-meta">
+        <span className="timeline-block-idx">{i + 1}</span>
+        <span className="timeline-block-label">{c.label}</span>
+        <span className="timeline-block-dur">{formatClip(c.durationS)}</span>
+      </div>
+      <button
+        type="button"
+        className="timeline-block-x nodrag"
+        aria-label="Remove clip"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => removeClip(c.id)}
+      >
+        <X size={11} aria-hidden />
+      </button>
+      <span
+        className="timeline-trim timeline-trim-r nodrag"
+        onPointerDown={(e) => startDrag(e, c, 'trim-r')}
+        aria-label="Trim end"
+      />
+    </div>
+  );
+
+  const canExport = videoClips.length >= 2;
 
   return (
     <div className="canvas-card-wrap">
       <Handle type="target" position={Position.Left} id={`${id}-in`} />
+      <Handle type="source" position={Position.Bottom} id={`${id}-out`} />
       <div className="canvas-node node-timeline">
         <CornerDelete id={id} />
         <div className="timeline-head">
           <Clapperboard size={13} strokeWidth={1.75} aria-hidden />
-          <span>Timeline</span>
+          <span>{d.title || 'Timeline'}</span>
           <span className="timeline-head-spacer" />
           <span className="timeline-head-total">{formatMmSs(total)} / {formatMmSs(trackSeconds)}</span>
+          <button
+            type="button"
+            className="timeline-export nodrag"
+            disabled={!canExport}
+            title={canExport ? 'Render the cut into one film' : 'Add at least 2 video clips to export'}
+            onClick={() => exportTimeline(id, clipsRef.current.map(({ url, kind, inS, durationS }) => ({ url, kind, inS, durationS })))}
+          >
+            <Film size={12} aria-hidden /> Export
+          </button>
         </div>
 
         <div
-          className="timeline-track"
+          className="timeline-track nowheel"
           style={{ width: trackWidthPx + 24 }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Ruler — fixed ticks every 10s. */}
+          {/* Ruler */}
           <div className="timeline-ruler" style={{ width: trackWidthPx }}>
             {ticks.map((t) => (
-              <span
-                key={t}
-                className="timeline-tick"
-                style={{ left: t * TIMELINE_PX_PER_SEC }}
-              >
+              <span key={t} className="timeline-tick" style={{ left: t * TIMELINE_PX_PER_SEC }}>
                 {formatMmSs(t)}
               </span>
             ))}
           </div>
 
-          <div className="timeline-strip" style={{ width: trackWidthPx }}>
-            {placed.length === 0 ? (
+          {/* Video lane */}
+          <div className="timeline-lane timeline-lane-video" style={{ width: trackWidthPx }}>
+            {placedVideo.length === 0 ? (
               <div className="timeline-empty-pop">
                 <button
                   type="button"
@@ -809,63 +970,42 @@ export function TimelineNode({ data, id }: NodeProps) {
                   onClick={() => setPickerOpen((v) => !v)}
                   aria-label="Add a clip"
                 >
-                  <Plus size={28} strokeWidth={2} aria-hidden />
+                  <Plus size={26} strokeWidth={2} aria-hidden />
                 </button>
                 <span className="timeline-empty-hint">Tap + to pick a clip from the canvas</span>
               </div>
             ) : (
-              placed.map((c, i) => (
-                <div
-                  key={c.id}
-                  className={`timeline-block ${c.kind === 'audio' ? 'is-audio' : ''}`}
-                  style={{ left: c.leftPx, width: c.widthPx }}
-                  title={`${c.label} · ${formatMmSs(c.durationS)}`}
-                >
-                  {c.kind === 'video' ? (
-                    <video src={c.url} preload="metadata" muted className="timeline-block-thumb" />
-                  ) : (
-                    <div className="timeline-block-thumb timeline-block-audio"><Music size={18} aria-hidden /></div>
-                  )}
-                  <div className="timeline-block-meta">
-                    <span className="timeline-block-idx">{i + 1}</span>
-                    <span className="timeline-block-label">{c.label}</span>
-                    <span className="timeline-block-dur">{formatMmSs(c.durationS)}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="timeline-block-x nodrag"
-                    aria-label="Remove clip"
-                    onClick={() => removeClip(i)}
-                  >
-                    <X size={11} aria-hidden />
-                  </button>
-                </div>
-              ))
+              placedVideo.map((c, i) => renderBlock(c, i))
             )}
           </div>
 
-          {placed.length > 0 && (
-            <div className="timeline-add-floating">
-              <button
-                type="button"
-                className="timeline-add nodrag"
-                aria-label="Add clip"
-                onClick={() => setPickerOpen((v) => !v)}
-              >
-                <Plus size={16} aria-hidden />
-              </button>
+          {/* Audio / music lane — only shown once a soundtrack is added. */}
+          {placedAudio.length > 0 && (
+            <div className="timeline-lane timeline-lane-audio" style={{ width: trackWidthPx }}>
+              {placedAudio.map((c, i) => renderBlock(c, i))}
             </div>
           )}
 
+          <div className="timeline-add-floating">
+            <button
+              type="button"
+              className="timeline-add nodrag"
+              aria-label="Add clip"
+              onClick={() => setPickerOpen((v) => !v)}
+            >
+              <Plus size={16} aria-hidden />
+            </button>
+          </div>
+
           {pickerOpen && (
-            <div className="timeline-picker" role="dialog" aria-label="Pick a clip">
+            <div className="timeline-picker nodrag" role="dialog" aria-label="Pick a clip">
               {available.length === 0
                 ? <div className="timeline-picker-empty">No finished video / music clips on the canvas yet.</div>
                 : available.map((c) => (
                   <button key={c.id} type="button" className="timeline-picker-item" onClick={() => addClip(c)}>
                     {c.kind === 'video' ? <Film size={13} aria-hidden /> : <Music size={13} aria-hidden />}
                     <span>{c.label}</span>
-                    <span className="timeline-picker-dur">{formatMmSs(c.durationS)}</span>
+                    <span className="timeline-picker-dur">{formatClip(c.durationS)}</span>
                   </button>
                 ))}
             </div>

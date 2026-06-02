@@ -354,12 +354,19 @@ export type StitchOrientation = 'landscape' | 'portrait';
 export interface LabelPos { x: number; y: number }
 
 // Concatenate clips end-to-end into one continuous film (storyboard → film).
-export async function concatVideos(items: { url: string }[]): Promise<GenerateResult | GenerateError> {
+// Each item may carry a trim: `inS` (seconds into the source to start) and
+// `durationS` (how many seconds to keep). Omit both to use the whole clip.
+// `music` (optional) is a soundtrack lane mixed under the whole film.
+export type ClipTrim = { url: string; inS?: number; durationS?: number };
+export async function concatVideos(
+  items: ClipTrim[],
+  music?: ClipTrim[],
+): Promise<GenerateResult | GenerateError> {
   try {
     const r = await fetch(`${base}/concat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, music: music ?? [] }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data?.ok === false) return { ok: false, error: data?.error || `concat failed (${r.status})` };

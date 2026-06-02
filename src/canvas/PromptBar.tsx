@@ -209,7 +209,12 @@ export default function PromptBar({ onSend }: Props) {
     if (walletState?.address) void navigator.clipboard.writeText(walletState.address);
   };
 
-  // Hydrate from the bound node whenever the selection changes.
+  // Hydrate from the bound node whenever the SELECTION changes — keyed on the
+  // node id only. Depending on the whole `selectedNode` object would re-run this
+  // on every data mutation (e.g. tweaking resolution/duration in the settings
+  // panel calls updateNodeData → new object), which would clobber the prompt the
+  // user is typing but hasn't sent yet. Re-sync on id/mode change only.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (bound && selectedNode) {
       const d = selectedNode.data as { prompt?: string; model?: string; referenceUrl?: string };
@@ -217,7 +222,7 @@ export default function PromptBar({ onSend }: Props) {
       setModel(d.model ?? MODE_META[bound].models[0].id);
       setAttachment(d.referenceUrl ?? null);
     }
-  }, [selectedNode?.id, bound, selectedNode]);
+  }, [selectedNode?.id, bound]);
 
   const onAttachClick = () => fileRef.current?.click();
   const onAttachFile = (e: React.ChangeEvent<HTMLInputElement>) => {

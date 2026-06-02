@@ -472,6 +472,7 @@ How to work:
 - Write rich, specific prompts (lighting, motion, style, mood) — they drive real paid generations.
 - LANGUAGE: write the prompt argument for generate_image / generate_video / generate_music in the SAME language the user wrote in (if the user wrote Chinese, the prompt must be Chinese). Do NOT translate it to English.
 - If you have drafted a storyboard / 分镜, feed each scene's description DIRECTLY into that step's prompt — keep its wording, detail and language verbatim; do not paraphrase or shorten it into a new (or English) prompt.
+- DURATION: when the user states a clip length (e.g. "4 秒", "a 6s shot", "make it 10 seconds"), you MUST pass it as duration_s on generate_video / generate_music — the prompt text alone does NOT set the length. Clamp to the model's allowed set: Sora 2 only 4/8/12s; Seedance/Grok 3–10s. If the user gives no length, omit duration_s (a sensible default applies).
 - When the deliverable is done, stop calling tools and give a short, friendly summary of what's on the canvas.
 
 Keep replies concise. Think in actions, not essays.`;

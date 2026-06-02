@@ -188,7 +188,7 @@ function CanvasInner() {
     }, 99) + 1,
   );
   const agentColIdx = useRef(0); // vertical position of the next standalone agent node
-  const { screenToFlowPosition, getNode, getNodes, getEdges, fitView } = useReactFlow();
+  const { screenToFlowPosition, getNode, getNodes, getEdges, fitView, updateNodeData } = useReactFlow();
   // Collision-proof id: skip any id already present on the canvas.
   const nextId = useCallback((): string => {
     let id: string;
@@ -803,12 +803,13 @@ function CanvasInner() {
     },
     async assembleFilm(nodeIds, title) {
       const items: { url: string }[] = [];
-      const clips: { id: string; url: string; kind: 'video'; label: string; durationS: number }[] = [];
+      const clips: { id: string; url: string; kind: 'video'; label: string; durationS: number; srcDurationS: number; inS: number }[] = [];
       for (const nid of nodeIds) {
         const d = getNode(nid)?.data as { resultUrl?: string; model?: string; title?: string; durationS?: number } | undefined;
         if (d?.resultUrl) {
+          const dur = d.durationS ?? 5;
           items.push({ url: d.resultUrl });
-          clips.push({ id: `c-${nid}-${idCounter.current++}`, url: d.resultUrl, kind: 'video', label: d.title || d.model || nid, durationS: d.durationS ?? 5 });
+          clips.push({ id: `c-${nid}-${idCounter.current++}`, url: d.resultUrl, kind: 'video', label: d.title || d.model || nid, durationS: dur, srcDurationS: dur, inS: 0 });
         }
       }
       if (items.length < 2) return { ok: false, error: 'need at least 2 finished clips to assemble a film' };
@@ -923,6 +924,46 @@ function CanvasInner() {
     }]);
   };
 
+  const exportTimeline = useCallback((
+    timelineNodeId: string,
+    clips: { url: string; kind: 'video' | 'audio'; inS?: number; durationS?: number }[],
+  ) => {
+    const tl = getNode(timelineNodeId);
+    if (!tl) return;
+    const video = clips.filter((c) => c.kind === 'video').map(({ url, inS, durationS }) => ({ url, inS, durationS }));
+    const music = clips.filter((c) => c.kind === 'audio').map(({ url, inS, durationS }) => ({ url, inS, durationS }));
+    if (video.length < 2) return;
+    const tlTitle = (tl.data as { title?: string }).title || 'Film';
+    const filmId = nextTypedId('film');
+    const tlW = (tl.measured?.width ?? tl.width ?? 1000);
+    // Drop the rendered film just below the timeline so the edit→export loop
+    // reads top-to-bottom.
+    const pos = { x: tl.position.x + Math.max(0, (tlW - 360) / 2), y: tl.position.y + 360 };
+    const filmNode: Node = {
+      id: filmId, type: 'videogen', position: pos,
+      data: {
+        title: `${tlTitle} · cut`, model: 'ffmpeg',
+        prompt: `Rendered ${video.length} clips${music.length ? ` + music` : ''}`,
+        status: 'running' as NodeStatus, progress: 0.1,
+      },
+    };
+    setNodes((nds) => [...nds, filmNode]);
+    setEdges((eds) => [...eds, {
+      id: `e-${timelineNodeId}-${filmId}`,
+      source: timelineNodeId, target: filmId,
+      sourceHandle: `${timelineNodeId}-out`, targetHandle: `${filmId}-in`,
+      type: 'flow',
+    }]);
+    setTimeout(() => fitView({ padding: 0.3, duration: 400, maxZoom: 1 }), 90);
+    void concatVideos(video, music.length ? music : undefined).then((r) => {
+      if (r.ok) {
+        updateNodeData(filmId, { status: 'done', progress: 1, resultUrl: r.resultUrl });
+      } else {
+        updateNodeData(filmId, { status: 'error', errorMsg: r.error });
+      }
+    });
+  }, [getNode, setNodes, setEdges, fitView, updateNodeData]);
+
   return (
     <div className="canvas-host">
       <div className="canvas-toolbar">
@@ -997,7 +1038,7 @@ function CanvasInner() {
         </button>
       </div>
 
-      <CanvasContext.Provider value={{ openConnectMenu, runImageEdit, runImageSplit, runAnnotate }}>
+      <CanvasContext.Provider value={{ openConnectMenu, runImageEdit, runImageSplit, runAnnotate, exportTimeline }}>
       <div className="canvas-body">
         <div className={`canvas-flow ${showMinimap ? 'has-minimap' : ''}`} onClick={dismissPending}>
         <ReactFlow

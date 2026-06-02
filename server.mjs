@@ -623,10 +623,20 @@ async function stitchComparison(items, mode = 'grid', orientation = 'landscape',
 // the first clip, capped at 1280 wide, even dims) so mismatched sizes/orientations
 // still join cleanly. Audio is concatenated when EVERY clip has a track; otherwise
 // the film is silent (concat needs matching stream counts).
-async function concatFilms(items) {
-  const urls = (Array.isArray(items) ? items : []).map((it) => (it && it.url) || it).filter(Boolean);
+async function concatFilms(items, music) {
+  // Each item is either a bare url/string, or { url, inS?, durationS? } where
+  // inS/durationS trim the clip (seconds). Keep the trims aligned with urls.
+  const list = (Array.isArray(items) ? items : [])
+    .map((it) => (typeof it === 'string' ? { url: it } : it))
+    .filter((it) => it && it.url);
+  const urls = list.map((it) => it.url);
   const n = urls.length;
   if (n < 2) throw new Error('need at least 2 clips to assemble a film');
+  // Optional music lane: one or more audio clips (trimmable) laid back-to-back
+  // and mixed under the whole film as a soundtrack.
+  const musicList = (Array.isArray(music) ? music : music ? [music] : [])
+    .map((it) => (typeof it === 'string' ? { url: it } : it))
+    .filter((it) => it && it.url);
   const jobId = `film_${crypto.randomUUID()}`;
   const tmp = path.join(JOBS_DIR, jobId + '_tmp');
   fs.mkdirSync(tmp, { recursive: true });
@@ -637,6 +647,12 @@ async function concatFilms(items) {
       if (!vp) { const { ext } = await downloadTo(urls[i], path.join(tmp, `v${i}`), 'mp4'); vp = path.join(tmp, `v${i}.${ext}`); }
       videoPaths.push(vp);
     }
+    const musicPaths = [];
+    for (let i = 0; i < musicList.length; i++) {
+      let mp = localGeneratedPath(musicList[i].url);
+      if (!mp) { const { ext } = await downloadTo(musicList[i].url, path.join(tmp, `m${i}`), 'mp3'); mp = path.join(tmp, `m${i}.${ext}`); }
+      musicPaths.push(mp);
+    }
     // Frame size from the first clip (even, ≤1280 wide).
     const dim = await probeDimensions(videoPaths[0]);
     let W = Math.min(1280, dim.w || 1280); W -= W % 2;
@@ -644,19 +660,76 @@ async function concatFilms(items) {
     const hasAudio = await Promise.all(videoPaths.map(probeHasAudio));
     const allAudio = hasAudio.every(Boolean);
 
+    // Per-clip trim → ffmpeg trim/atrim filters. A clip with no trim plays whole.
+    const trimOf = (it) => {
+      const inS = Math.max(0, Number(it?.inS) || 0);
+      const durS = Number(it?.durationS);
+      const dur = Number.isFinite(durS) && durS > 0 ? durS : null;
+      return { inS, dur };
+    };
+
+    // Film length = sum of each video clip's effective (trimmed) duration —
+    // probe the untrimmed ones so the soundtrack can be fit to the total.
+    let filmDur = 0;
+    for (let i = 0; i < n; i++) {
+      const { inS, dur } = trimOf(list[i]);
+      if (dur != null) filmDur += dur;
+      else { const full = await probeDuration(videoPaths[i]).catch(() => 0); filmDur += Math.max(0, (full || 0) - inS); }
+    }
+
     const inputs = [];
     for (const v of videoPaths) inputs.push('-i', v);
+    for (const m of musicPaths) inputs.push('-i', m);
+    const musicBase = n; // music input indices start after the video inputs
     const fit = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p`;
     let fc = '';
     const parts = [];
     for (let i = 0; i < n; i++) {
-      fc += `[${i}:v]${fit}[v${i}];`;
-      if (allAudio) { fc += `[${i}:a]aresample=async=1:first_pts=0[a${i}];`; parts.push(`[v${i}][a${i}]`); }
-      else parts.push(`[v${i}]`);
+      const { inS, dur } = trimOf(list[i]);
+      const vtrim = (inS > 0 || dur != null)
+        ? `trim=start=${inS}${dur != null ? `:duration=${dur}` : ''},setpts=PTS-STARTPTS,`
+        : '';
+      fc += `[${i}:v]${vtrim}${fit}[v${i}];`;
+      if (allAudio) {
+        const atrim = (inS > 0 || dur != null)
+          ? `atrim=start=${inS}${dur != null ? `:duration=${dur}` : ''},asetpts=PTS-STARTPTS,`
+          : '';
+        fc += `[${i}:a]${atrim}aresample=async=1:first_pts=0[a${i}];`;
+        parts.push(`[v${i}][a${i}]`);
+      } else parts.push(`[v${i}]`);
     }
-    fc += `${parts.join('')}concat=n=${n}:v=1:a=${allAudio ? 1 : 0}[outv]${allAudio ? '[outa]' : ''}`;
+    const hasMusic = musicPaths.length > 0;
+    fc += `${parts.join('')}concat=n=${n}:v=1:a=${allAudio ? 1 : 0}[outv]${allAudio ? '[filmA]' : ''};`;
+
+    // Build the soundtrack: concat the music clips, then fit to the film length
+    // (pad if short, trim if long) so it spans the whole cut.
+    let outAudioLabel = null;
+    if (hasMusic) {
+      const mParts = [];
+      for (let i = 0; i < musicPaths.length; i++) {
+        const { inS, dur } = trimOf(musicList[i]);
+        const at = (inS > 0 || dur != null)
+          ? `atrim=start=${inS}${dur != null ? `:duration=${dur}` : ''},`
+          : '';
+        fc += `[${musicBase + i}:a]${at}asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0[m${i}];`;
+        mParts.push(`[m${i}]`);
+      }
+      if (musicPaths.length > 1) fc += `${mParts.join('')}concat=n=${musicPaths.length}:v=0:a=1[mcat];`;
+      else fc += `${mParts[0]}anull[mcat];`;
+      fc += `[mcat]apad,atrim=duration=${filmDur.toFixed(3)},asetpts=PTS-STARTPTS[music];`;
+      if (allAudio) {
+        // Duck the soundtrack under the clips' own audio, then mix.
+        fc += `[music]volume=0.65[musicv];[filmA][musicv]amix=inputs=2:duration=first:dropout_transition=0[outa]`;
+        outAudioLabel = '[outa]';
+      } else outAudioLabel = '[music]';
+    } else if (allAudio) {
+      outAudioLabel = '[filmA]';
+    }
+    // Trim trailing ';' when no extra audio graph was appended.
+    fc = fc.replace(/;$/, '');
+
     const map = ['-map', '[outv]'];
-    if (allAudio) map.push('-map', '[outa]', '-c:a', 'aac');
+    if (outAudioLabel) map.push('-map', outAudioLabel, '-c:a', 'aac');
     else map.push('-an');
     const outPath = path.join(JOBS_DIR, `${jobId}.mp4`);
     await runFfmpeg(['-y', ...inputs, '-filter_complex', fc, ...map, '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', outPath]);
@@ -1025,10 +1098,11 @@ const server = http.createServer(async (req, res) => {
       let body;
       try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
       const items = Array.isArray(body.items) ? body.items : [];
+      const music = Array.isArray(body.music) ? body.music : (body.music ? [body.music] : []);
       const t0 = Date.now();
       try {
-        const out = await concatFilms(items);
-        console.log(`[concat] joined ${items.length} clips in ${Date.now() - t0}ms`);
+        const out = await concatFilms(items, music);
+        console.log(`[concat] joined ${items.length} clips${music.length ? ` + ${music.length} music` : ''} in ${Date.now() - t0}ms`);
         return json(req, res, { ok: true, ...out });
       } catch (err) {
         console.warn(`[concat] FAIL: ${err.message || err}`);
