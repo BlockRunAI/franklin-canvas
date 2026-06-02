@@ -84,9 +84,6 @@ export const TEXT_MODELS: { id: string; label: string; priceK: number; tools?: b
   { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', priceK: 0.00075 },
   // Free (NVIDIA-hosted). Great for the Text node; usable as an Agent model only
   // if they support tool calling — verified before listing.
-  // Flash emits tool calls as <tool_call> text the gateway doesn't yet parse into
-  // structured tool_calls, so it can't drive the Agent — Text node only for now.
-  { id: 'nvidia/deepseek-v4-flash', label: 'DeepSeek V4 Flash · Free', priceK: 0, tools: false },
   { id: 'nvidia/qwen3.5-397b-a17b', label: 'Qwen3.5 397B · Free', priceK: 0 },
 ];
 
