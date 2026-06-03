@@ -13,19 +13,9 @@ infinite canvas, chain them into visual workflows, and let an <strong>AI agent</
 <img alt="x402" src="https://img.shields.io/badge/payment-x402-blue.svg">
 </p>
 
-<!-- ▶ INLINE VIDEO PLAYER:
-     To get GitHub's click-to-play player, edit this README on github.com, drag
-     `assets/hero-demo.mp4` into the editor, and paste the
-     `https://github.com/user-attachments/assets/…` URL it generates on its own
-     line right below this comment (remove the cover link block).
-     Until then, the cover image below is clickable and opens the video. -->
+https://github.com/user-attachments/assets/7bbced39-90fd-4fb8-9346-83c0a52d6e49
 
-<p align="center">
-  <a href="https://github.com/BlockRunAI/franklin-canvas/blob/main/assets/hero-demo.mp4">
-    <img src="assets/hero-cover.jpg" alt="Watch the Franklin Canvas demo" width="100%">
-  </a>
-  <br/><sub>▶︎ <a href="https://github.com/BlockRunAI/franklin-canvas/blob/main/assets/hero-demo.mp4">Watch the 3-feature demo</a> — prompt library · one-sentence AI short film · model comparison</sub>
-</p>
+<p align="center"><sub>▶︎ The 3-feature demo — prompt library · one-sentence AI short film · model comparison</sub></p>
 
 > **Franklin Canvas is live — and fully open source.** If it's useful, please ⭐️ the repo.
 > To try it, [clone & run](#quick-start) and top up the auto-created wallet with a little **USDC** (pay-per-use, no subscription).
