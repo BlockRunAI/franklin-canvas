@@ -13,6 +13,23 @@ infinite canvas, chain them into visual workflows, and let an <strong>AI agent</
 <img alt="x402" src="https://img.shields.io/badge/payment-x402-blue.svg">
 </p>
 
+<!-- ▶ INLINE VIDEO PLAYER:
+     To get GitHub's click-to-play player, edit this README on github.com, drag
+     `assets/hero-demo.mp4` into the editor, and paste the
+     `https://github.com/user-attachments/assets/…` URL it generates on its own
+     line right below this comment (remove the cover link block).
+     Until then, the cover image below is clickable and opens the video. -->
+
+<p align="center">
+  <a href="https://github.com/BlockRunAI/franklin-canvas/blob/main/assets/hero-demo.mp4">
+    <img src="assets/hero-cover.jpg" alt="Watch the Franklin Canvas demo" width="100%">
+  </a>
+  <br/><sub>▶︎ <a href="https://github.com/BlockRunAI/franklin-canvas/blob/main/assets/hero-demo.mp4">Watch the 3-feature demo</a> — prompt library · one-sentence AI short film · model comparison</sub>
+</p>
+
+> **Franklin Canvas is live — and fully open source.** If it's useful, please ⭐️ the repo.
+> To try it, [clone & run](#quick-start) and top up the auto-created wallet with a little **USDC** (pay-per-use, no subscription).
+
 Drop a node, type a prompt, hit Send — then wire nodes into a workflow (image → animate →
 stitch), or just describe what you want and let the **Media Agent** build it on the canvas.
 An infinite canvas for **image, video and music**, with side-by-side **model comparison**,
@@ -28,12 +45,9 @@ SDK) — no subscription, no account, no API keys.
 
 **🤖 Media Agent**
 
-<sub>Describe it — the agent plans and builds the workflow on the canvas, step by step.</sub>
+<sub>One sentence → the agent storyboards, generates every shot, and cuts a whole short film on the canvas.</sub>
 
-<!-- Record a clip, then:  ./scripts/demo-gif.sh recording.mov agent-demo
-     …and replace the line below with:  ![Media Agent demo](assets/agent-demo.gif)
-     (or drag assets/agent-demo.mp4 into the GitHub README editor for an inline video) -->
-<em>▶︎ demo coming soon</em>
+<sub>▶︎ see it in the <a href="https://github.com/BlockRunAI/franklin-canvas/blob/main/assets/hero-demo.mp4">demo video</a> above</sub>
 
 </td>
 <td width="50%" align="center">
@@ -109,6 +123,11 @@ npm start            # → http://localhost:5173
 
 Requires Node 18+ (uses native `fetch`). `npm start` boots both halves with `[api]`
 and `[ui]` log prefixes; `Ctrl-C` stops them together.
+
+> 💸 **To actually generate, top up the wallet with USDC.** A wallet auto-creates on
+> first launch; the PromptBar shows its address while the balance is under $0.01 (click
+> to copy). Send a few USDC on **Base** (or Solana) to that address and you're ready —
+> every generation pays per call, no subscription. See [Wallet](#wallet) below.
 
 ### Wallet
 

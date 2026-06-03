@@ -51,7 +51,7 @@ interface Props {
   }) => void;
 }
 
-function costFor(mode: Mode, modelId: string, durationS = 8): number {
+function costFor(mode: Mode, modelId: string, durationS = 5): number {
   if (mode === 'imagegen') {
     const m = IMAGE_MODELS.find((x) => x.id === modelId);
     return m?.price ?? 0;
@@ -437,7 +437,7 @@ export default function PromptBar({ onSend }: Props) {
               const value: VideoSettings = {
                 mode: nd?.mode ?? 'standard',
                 ratio: nd?.ratio ?? '16:9',
-                durationS: nd?.durationS ?? 8,
+                durationS: nd?.durationS ?? 5,
                 resolution: nd?.resolution ?? '720p',
                 audio: nd?.audio ?? true,
               };
@@ -461,7 +461,7 @@ export default function PromptBar({ onSend }: Props) {
         >
           <span className="pb-cost-symbol">USDC</span>
           <span className="pb-cost-n">
-            ${costFor(mode, model, (selectedNode?.data as { durationS?: number })?.durationS ?? 8).toFixed(3)}
+            ${costFor(mode, model, (selectedNode?.data as { durationS?: number })?.durationS ?? 5).toFixed(3)}
           </span>
         </div>
         <button

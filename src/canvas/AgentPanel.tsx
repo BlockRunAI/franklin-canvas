@@ -184,7 +184,7 @@ export default function AgentPanel({ open, onClose, api }: Props) {
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         if (stopRef.current) break;
         await compactIfNeeded();
-        const res = await agentChat(model, turnsRef.current);
+        const res = await agentChat(model, turnsRef.current, { image: imageModel, video: videoModel });
         if (!res.ok) { push({ kind: 'agent', text: `Sorry — ${res.error}` }); break; }
         const msg = res.message;
         turnsRef.current.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls });

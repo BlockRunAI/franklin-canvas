@@ -172,6 +172,8 @@ export interface GenerateRequest {
   imageUrl?: string;
   /** Second image. kind:image → multi-image fusion; kind:video → last frame. */
   imageUrl2?: string;
+  /** Video omni / multi-reference images (Seedance 2.0) — character/style refs. */
+  referenceImageUrls?: string[];
   aspectRatio?: 'adaptive' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '21:9' | '9:21';
   resolution?: '360p' | '480p' | '540p' | '720p' | '1080p' | '1K' | '2K' | '4K';
   generateAudio?: boolean;
@@ -267,12 +269,13 @@ export interface AgentChatResult {
   finish_reason: string;
 }
 
-export async function agentChat(model: string | undefined, messages: ChatTurn[]): Promise<AgentChatResult | GenerateError> {
+export interface AgentDefaults { image?: string; video?: string; music?: string }
+export async function agentChat(model: string | undefined, messages: ChatTurn[], defaults?: AgentDefaults): Promise<AgentChatResult | GenerateError> {
   try {
     const r = await fetch(`${base}/agent/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages }),
+      body: JSON.stringify({ model, messages, defaults }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data?.ok === false) return { ok: false, error: data?.error || `agent failed (${r.status})` };
@@ -328,6 +331,30 @@ export async function describeMedia(imageUrl: string, question?: string): Promis
   } catch (err) {
     return { ok: false, error: (err as Error).message || 'network error' };
   }
+}
+
+// ── Agent memory (durable facts the agent saved across sessions) ──
+export interface AgentMemory { ts: number; text: string }
+
+export async function listAgentMemory(): Promise<AgentMemory[]> {
+  try {
+    const r = await fetch(`${base}/agent/memory`);
+    const data = await r.json().catch(() => ({}));
+    return data?.ok ? (data.memories as AgentMemory[]) : [];
+  } catch { return []; }
+}
+
+// Delete one memory by ts, or clear all when ts is omitted. Returns remaining count.
+export async function deleteAgentMemory(ts?: number): Promise<number> {
+  try {
+    const r = await fetch(`${base}/agent/memory`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(ts == null ? {} : { ts }),
+    });
+    const data = await r.json().catch(() => ({}));
+    return data?.ok ? (data.remaining as number) : 0;
+  } catch { return 0; }
 }
 
 // Translate a batch of short strings (Prompt Library title localization).

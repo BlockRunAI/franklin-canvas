@@ -44,12 +44,12 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_image',
-      description: `Generate an image from a text prompt and place it as a node on the canvas. Set reference_node_id to an existing image node to do image-to-image (style/subject reference). Available models: ${IMAGE_MODEL_IDS}. Omit model to use the user's default.`,
+      description: `Generate an image from a text prompt and place it as a node on the canvas. Set reference_node_id to an existing image node to do image-to-image (style/subject reference). LEAVE model UNSET to use the user's configured default — only set it when the user explicitly names a model. Available models if needed: ${IMAGE_MODEL_IDS}.`,
       parameters: {
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'Detailed image prompt (subject, lighting, style, mood).' },
-          model: { type: 'string', description: 'Image model id, or omit for the default.' },
+          model: { type: 'string', description: "Image model id. OMIT to use the user's default (recommended); set only when the user explicitly names a model." },
           reference_node_id: { type: 'string', description: 'Optional node id of an existing image to use as a reference (image-to-image).' },
           aspect_ratio: { type: 'string', enum: ['1:1', '16:9', '9:16', '4:3', '3:4'], description: 'Optional aspect ratio.' },
         },
@@ -61,12 +61,12 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_video',
-      description: `Generate a video and place it as a node on the canvas. Set from_node_id to an existing image node to animate that image (image→video); omit it for text→video. Available models: ${VIDEO_MODEL_IDS}. Note: Sora 2 only supports 4/8/12s; Seedance/Grok support 3-10s.`,
+      description: `Generate a video and place it as a node on the canvas. Set from_node_id to an existing image node to animate that image (image→video); omit it for text→video. LEAVE model UNSET to use the user's configured default — only set it when the user explicitly names a model. Available models if needed: ${VIDEO_MODEL_IDS}. Note: Sora 2 only supports 4/8/12s; Seedance/Grok support 3-10s.`,
       parameters: {
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'Detailed motion/scene prompt.' },
-          model: { type: 'string', description: 'Video model id, or omit for the default.' },
+          model: { type: 'string', description: "Video model id. OMIT to use the user's default (recommended); set only when the user explicitly names a model." },
           from_node_id: { type: 'string', description: 'Optional node id of an image to animate (image→video).' },
           duration_s: { type: 'number', description: 'Clip length in seconds (default 5).' },
           aspect_ratio: { type: 'string', enum: ['16:9', '9:16', '1:1'], description: 'Optional aspect ratio (9:16 for TikTok).' },
@@ -513,6 +513,27 @@ function memorySave(text) {
   return 'Saved.';
 }
 
+// Read every saved memory as {ts, text}, newest first. For the Settings UI.
+export function listMemories() {
+  if (!fs.existsSync(MEMORY_FILE)) return [];
+  return fs.readFileSync(MEMORY_FILE, 'utf8').split('\n').filter(Boolean)
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((r) => r && r.text)
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+}
+
+// Delete one memory by its timestamp, or clear all when ts is null/undefined.
+// Returns the number of remaining memories.
+export function deleteMemory(ts) {
+  if (!fs.existsSync(MEMORY_FILE)) return 0;
+  if (ts == null) { fs.writeFileSync(MEMORY_FILE, ''); return 0; }
+  const rows = fs.readFileSync(MEMORY_FILE, 'utf8').split('\n').filter(Boolean)
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((r) => r && r.text && r.ts !== ts);
+  fs.writeFileSync(MEMORY_FILE, rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : ''));
+  return rows.length;
+}
+
 async function mixtureOfAgents(question, ctx) {
   const panel = ['anthropic/claude-sonnet-4.6', 'openai/gpt-5.5', 'google/gemini-3.1-pro'];
   const client = llm(ctx);
@@ -714,10 +735,17 @@ function sanitizeMessages(messages) {
   return out;
 }
 
-export async function runAgentChat({ model, messages }, ctx) {
+export async function runAgentChat({ model, messages, defaults }, ctx) {
   const client = llm(ctx);
   const planModel = model || 'anthropic/claude-sonnet-4.6';
-  const msgs = [{ role: 'system', content: AGENT_CHAT_SYSTEM }, ...sanitizeMessages(messages)];
+  // Tell the agent the user's configured default media models so it honours them
+  // instead of picking its own. The app fills in these defaults whenever the
+  // `model` argument is omitted, so the agent should leave `model` unset.
+  let system = AGENT_CHAT_SYSTEM;
+  if (defaults && (defaults.image || defaults.video || defaults.music)) {
+    system += `\n\nUSER'S DEFAULT MODELS (configured in Settings): image=${defaults.image || '(app default)'}, video=${defaults.video || '(app default)'}, music=${defaults.music || '(app default)'}. DO NOT set the \`model\` argument on generate_image / generate_video / generate_music — leave it unset so these defaults are used. Only set \`model\` when the user EXPLICITLY names a specific model in their message.`;
+  }
+  const msgs = [{ role: 'system', content: system }, ...sanitizeMessages(messages)];
   const resp = await client.chatCompletion(planModel, msgs, {
     tools: AGENT_TOOLS,
     toolChoice: 'auto',

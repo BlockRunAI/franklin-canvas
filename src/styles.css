@@ -2373,6 +2373,31 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .settings-pane-section h2 { margin: 0 0 14px; font-size: 18px; color: var(--fg); }
 .settings-subhead { margin: 18px 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-faint); }
 .settings-foot-note { color: var(--fg-dim); font-size: 12.5px; line-height: 1.55; margin: 10px 0 0; }
+
+/* Agent memory list (Settings → Agent) */
+.settings-mem-head { display: flex; align-items: center; justify-content: space-between; }
+.settings-mem-clear {
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 10.5px; font-weight: 600; text-transform: none; letter-spacing: 0;
+  color: var(--fg-faint); padding: 2px 4px; border-radius: 5px;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.settings-mem-clear:hover { color: #e5484d; background: var(--bg-hover); }
+.settings-mem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.settings-mem-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 9px;
+  background: var(--panel-soft); border: 1px solid var(--border);
+}
+.settings-mem-text { flex: 1; font-size: 12.5px; line-height: 1.4; color: var(--fg); }
+.settings-mem-date { flex-shrink: 0; font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.settings-mem-del {
+  flex-shrink: 0; width: 24px; height: 24px; padding: 0; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg-card); color: var(--fg-faint);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.settings-mem-del:hover { color: #fff; background: #e5484d; border-color: #e5484d; }
 .settings-balance { display: flex; align-items: baseline; gap: 8px; padding: 14px 16px; border-radius: var(--radius); background: var(--accent-bg); border: 1px solid var(--border); }
 .settings-balance-num { font-size: 26px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
 .settings-balance-unit { font-size: 12.5px; color: var(--fg-dim); }
@@ -2587,7 +2612,7 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
    it at proportional widths. Looks like a stripped-down NLE track.
    Overrides the .canvas-node defaults (240px wide + overflow hidden)
    because the track is significantly wider than a normal node card. */
-/* ── Timeline node — a clean, light NLE track (CapCut / Canva-style) that uses
+/* ── Timeline node — a clean, light non-linear-editor track that uses
    the app's own cream + gold palette: soft track surface, full-bleed thumbnail
    clip tiles with frosted-glass labels, gold waveform audio clips, white pill
    trim handles, ruler-aligned grid. */
@@ -2777,7 +2802,7 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .timeline-block-x:hover { background: #e5484d; color: #fff; border-color: #e5484d; }
 
 /* Trim handles — white rounded pills that appear at the clip edges on hover
-   (CapCut affordance), turning gold while dragging. */
+   (standard NLE affordance), turning gold while dragging. */
 .timeline-trim {
   position: absolute; top: 0; bottom: 0; width: 14px; z-index: 5;
   cursor: ew-resize;

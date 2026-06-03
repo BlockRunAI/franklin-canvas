@@ -32,7 +32,7 @@ import {
   extractPaymentDetails,
   createPaymentPayload,
 } from '@blockrun/llm';
-import { runAgentChat, runBackendTool, describeMedia, summarizeConversation, CANVAS_TOOL_NAMES } from './agent-tools.mjs';
+import { runAgentChat, runBackendTool, describeMedia, summarizeConversation, listMemories, deleteMemory, CANVAS_TOOL_NAMES } from './agent-tools.mjs';
 
 const PORT = 3100;
 const apiUrl = process.env.BLOCKRUN_API_URL || undefined;
@@ -257,6 +257,9 @@ async function generateVideo(body, jobId) {
     // Second image on a video job = the LAST frame (first-and-last-frame
     // interpolation; Seedance only, gateway validates support).
     ...(body.imageUrl2 ? { last_frame_url: body.imageUrl2 } : {}),
+    // Omni / multi-reference images (Seedance 2.0) — character/style refs.
+    ...(Array.isArray(body.referenceImageUrls) && body.referenceImageUrls.length
+      ? { reference_image_urls: body.referenceImageUrls } : {}),
     ...(body.durationS ? { duration_seconds: body.durationS } : {}),
     ...(body.aspectRatio ? { aspect_ratio: body.aspectRatio } : {}),
     ...(body.resolution ? { resolution: body.resolution } : {}),
@@ -981,7 +984,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const { privateKey, address } = getWallet();
         if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.' }, 400);
-        const out = await runAgentChat({ model: body.model, messages: body.messages }, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        const out = await runAgentChat({ model: body.model, messages: body.messages, defaults: body.defaults }, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
         // Debug: log exactly which tools the model asked for (name + args) so we
         // can see the agent's run history. Written to a file (immediate flush).
         try {
@@ -1031,6 +1034,24 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         console.warn(`[agent] summarize FAIL: ${err.message || err}`);
         return json(req, res, { ok: false, error: err.message || String(err) }, 502);
+      }
+    }
+
+    // Agent memory: list / delete the durable facts the agent saved
+    // (~/.franklin/agent-memory.jsonl). Backs the Settings → Agent memory panel.
+    if (p === '/api/agent/memory' && req.method === 'GET') {
+      try { return json(req, res, { ok: true, memories: listMemories() }); }
+      catch (err) { return json(req, res, { ok: false, error: err.message || String(err) }, 500); }
+    }
+    if (p === '/api/agent/memory' && req.method === 'DELETE') {
+      const raw = await readBody(req);
+      let body = {};
+      try { body = raw ? JSON.parse(raw) : {}; } catch { /* treat as clear-all */ }
+      try {
+        const remaining = deleteMemory(body.ts == null ? null : Number(body.ts));
+        return json(req, res, { ok: true, remaining });
+      } catch (err) {
+        return json(req, res, { ok: false, error: err.message || String(err) }, 500);
       }
     }
 

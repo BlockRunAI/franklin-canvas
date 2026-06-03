@@ -43,6 +43,11 @@ import { useThemeStore } from '../canvas/themeStore';
 // world.
 const CHEAP_IMAGE = IMAGE_MODELS.find((m) => m.id === 'google/nano-banana') ?? IMAGE_MODELS[0];
 const CHEAP_VIDEO = [...VIDEO_MODELS].sort((a, b) => a.pricePerS - b.pricePerS)[0];
+// Image models that accept a second reference (multi-image fusion). Mirrors the
+// gateway's EDIT_SUPPORTED_MODELS and the PromptBar dual-slot gate.
+const SECOND_IMAGE_IMAGE_MODELS = new Set<string>([
+  'openai/gpt-image-1', 'openai/gpt-image-2', 'google/nano-banana', 'google/nano-banana-pro',
+]);
 const INITIAL_NODES: Node[] = [
   { id: 'n1', type: 'upload', position: { x: 80, y: 160 }, data: { label: 'photo' } },
   {
@@ -63,9 +68,9 @@ const INITIAL_NODES: Node[] = [
     data: {
       label: 'video',
       model: CHEAP_VIDEO.id,
-      prompt: '8s cinematic shot of a paper plane drifting through clouds',
-      priceUsd: CHEAP_VIDEO.pricePerS * 8,
-      durationS: 8,
+      prompt: '5s cinematic shot of a paper plane drifting through clouds',
+      priceUsd: CHEAP_VIDEO.pricePerS * 5,
+      durationS: 5,
     } as GenNodeData,
   },
 ];
@@ -522,8 +527,16 @@ function CanvasInner() {
     const rawRef = (mode === 'imagegen' || mode === 'videogen') ? (referenceUrlOverride ?? d.referenceUrl) : undefined;
     // Video seed images especially must be small; shrink before sending.
     const imageUrl = await shrinkReference(rawRef, mode === 'videogen' ? 768 : 1024);
-    // Second image: imagegen → fusion reference; videogen → last frame.
-    const rawRef2 = (mode === 'imagegen' || mode === 'videogen') ? d.referenceUrl2 : undefined;
+    // Second image: imagegen → fusion reference; videogen → last frame. Only
+    // send it when the CURRENT model actually supports a second image (image
+    // fusion models / Seedance first-last) — otherwise a stale ref left over
+    // from a previous model would 400 upstream.
+    const effModel = modelOverride ?? d.model;
+    const supportsSecondImage =
+      mode === 'imagegen' ? SECOND_IMAGE_IMAGE_MODELS.has(effModel)
+      : mode === 'videogen' ? effModel.startsWith('bytedance/seedance')
+      : false;
+    const rawRef2 = supportsSecondImage ? d.referenceUrl2 : undefined;
     const imageUrl2 = await shrinkReference(rawRef2, mode === 'videogen' ? 768 : 1024);
 
     const kindMap = { imagegen: 'image', videogen: 'video', musicgen: 'music' } as const;
@@ -531,7 +544,7 @@ function CanvasInner() {
       kind: kindMap[mode],
       prompt,
       model: modelOverride ?? d.model,
-      durationS: mode === 'videogen' || mode === 'musicgen' ? (d.durationS ?? 8) : undefined,
+      durationS: mode === 'videogen' ? (d.durationS ?? 5) : mode === 'musicgen' ? (d.durationS ?? 8) : undefined,
       lyrics: mode === 'musicgen' && d.lyricsMode === 'custom' ? d.lyrics : undefined,
       instrumental: mode === 'musicgen' ? !d.lyrics && d.lyricsMode === 'adaptive' ? false : undefined : undefined,
       imageUrl,

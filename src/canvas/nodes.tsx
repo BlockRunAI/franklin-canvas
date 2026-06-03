@@ -486,7 +486,7 @@ export function VideoGenNode({ data, id }: NodeProps) {
   const [settings, setSettings] = useState<VideoSettings>({
     mode: d.mode ?? 'standard',
     ratio: d.ratio ?? '16:9',
-    durationS: d.durationS ?? 8,
+    durationS: d.durationS ?? 5,
     resolution: d.resolution ?? '720p',
     audio: d.audio ?? true,
   });
@@ -784,7 +784,7 @@ export function TimelineNode({ data, id }: NodeProps) {
     for (const n of s.nodes) {
       const nd = n.data as { resultUrl?: string; title?: string; durationS?: number };
       if (n.type === 'videogen' && nd.resultUrl) {
-        out.push({ id: n.id, url: nd.resultUrl, kind: 'video', label: nd.title || 'video', durationS: nd.durationS ?? 8 });
+        out.push({ id: n.id, url: nd.resultUrl, kind: 'video', label: nd.title || 'video', durationS: nd.durationS ?? 5 });
       } else if (n.type === 'musicgen' && nd.resultUrl) {
         out.push({ id: n.id, url: nd.resultUrl, kind: 'audio', label: nd.title || 'music', durationS: nd.durationS ?? 60 });
       }
@@ -910,7 +910,7 @@ export function TimelineNode({ data, id }: NodeProps) {
   };
 
   // Hover-scrub: moving the cursor across a video clip seeks its preview frame
-  // to that point in the (trimmed) clip — like CapCut / Finder Quick Look.
+  // to that point in the (trimmed) clip — a scrubbable thumbnail preview.
   const scrubThumb = (e: React.PointerEvent<HTMLVideoElement>, clip: TimelineClip) => {
     if (draggingRef.current) return;
     const v = e.currentTarget;
@@ -1125,7 +1125,7 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
   { type: 'imagegen', label: 'Image', description: 'Photoreal, stylized, anime', category: 'generate', icon: ImageIcon,
     defaultData: { model: IMAGE_MODELS[0].id, prompt: '', priceUsd: IMAGE_MODELS[0].price } },
   { type: 'videogen', label: 'Video', description: '5–30s clips, multi-model', category: 'generate', icon: Film,
-    defaultData: { model: VIDEO_MODELS[0].id, prompt: '', priceUsd: VIDEO_MODELS[0].pricePerS * 8, durationS: 8, audio: true } },
+    defaultData: { model: VIDEO_MODELS[0].id, prompt: '', priceUsd: VIDEO_MODELS[0].pricePerS * 5, durationS: 5, audio: true } },
   { type: 'musicgen', label: 'Music', description: '~3min tracks with optional lyrics', category: 'generate', icon: Music,
     defaultData: { model: MUSIC_MODELS[0].id, prompt: '', priceUsd: MUSIC_MODELS[0].price, lyricsMode: 'adaptive', lyrics: '' } },
   // Utility

@@ -5,9 +5,9 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  X, Wallet, Boxes, Info, Copy, Check, ExternalLink, SlidersHorizontal, Bot, type LucideIcon,
+  X, Wallet, Boxes, Info, Copy, Check, ExternalLink, SlidersHorizontal, Bot, Trash2, type LucideIcon,
 } from 'lucide-react';
-import { getWallet } from '../api/franklin';
+import { getWallet, listAgentMemory, deleteAgentMemory, type AgentMemory } from '../api/franklin';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, TEXT_MODELS } from './nodes';
 import { usePrefsStore, type EdgeStyle } from './prefsStore';
 import { useAgentPrefs, type AgentMode } from './agentPrefsStore';
@@ -292,6 +292,66 @@ function AboutPane() {
   );
 }
 
+// Agent memory: durable facts the agent saved (~/.franklin/agent-memory.jsonl).
+// Shown here so the user can review and prune what the agent remembers.
+function AgentMemorySection() {
+  const [memories, setMemories] = useState<AgentMemory[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listAgentMemory().then((m) => { if (!cancelled) setMemories(m); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const removeOne = async (ts: number) => {
+    setMemories((prev) => (prev ? prev.filter((m) => m.ts !== ts) : prev));
+    await deleteAgentMemory(ts);
+  };
+  const clearAll = async () => {
+    setMemories([]);
+    await deleteAgentMemory();
+  };
+
+  const fmtDate = (ts: number) => {
+    try { return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
+    catch { return ''; }
+  };
+
+  return (
+    <>
+      <h3 className="settings-subhead settings-mem-head">
+        Agent memory
+        {memories && memories.length > 0 && (
+          <button type="button" className="settings-mem-clear" onClick={clearAll}>Clear all</button>
+        )}
+      </h3>
+      {memories === null ? (
+        <p className="settings-foot-note">Loading memories…</p>
+      ) : memories.length === 0 ? (
+        <p className="settings-foot-note">No saved memories yet. The agent saves durable facts (preferences, recurring characters, brand details) as you work.</p>
+      ) : (
+        <ul className="settings-mem-list">
+          {memories.map((m) => (
+            <li key={m.ts} className="settings-mem-row">
+              <span className="settings-mem-text">{m.text}</span>
+              <span className="settings-mem-date">{fmtDate(m.ts)}</span>
+              <button
+                type="button"
+                className="settings-mem-del"
+                onClick={() => void removeOne(m.ts)}
+                aria-label="Delete memory"
+                title="Delete this memory"
+              >
+                <Trash2 size={13} aria-hidden />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 function AgentPane() {
   const t = useT();
   const mode = useAgentPrefs((s) => s.mode);
@@ -356,6 +416,8 @@ function AgentPane() {
       </div>
 
       <p className="settings-foot-note">{t('agent_models_hint')}</p>
+
+      <AgentMemorySection />
     </div>
   );
 }
