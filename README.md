@@ -47,7 +47,9 @@ SDK) — no subscription, no account, no API keys.
 
 <sub>One sentence → the agent storyboards, generates every shot, and cuts a whole short film on the canvas.</sub>
 
-<sub>▶︎ see it in the <a href="https://github.com/BlockRunAI/franklin-canvas/blob/main/assets/hero-demo.mp4">demo video</a> above</sub>
+![Media Agent demo](assets/agent-demo.gif)
+
+<sub>▶︎ <a href="assets/agent-demo.mp4">Watch in HD (MP4)</a></sub>
 
 </td>
 <td width="50%" align="center">
