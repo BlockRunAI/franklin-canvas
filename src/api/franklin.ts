@@ -256,9 +256,16 @@ export interface ToolCall {
   type: 'function';
   function: { name: string; arguments: string };
 }
+// OpenAI-style multimodal content part. A user turn carrying an image attachment
+// uses the array form: [{type:'text'}, {type:'image_url'}]. The gateway already
+// accepts this (see /api/describe vision call) for vision-capable models.
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export interface ChatTurn {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content?: string | null;
+  content?: string | ChatContentPart[] | null;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;

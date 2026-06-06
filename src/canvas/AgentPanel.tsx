@@ -11,11 +11,12 @@ import { createPortal } from 'react-dom';
 import {
   Send, X, Loader2, Check, Image as ImageIcon, Film, Music, Play, SkipForward,
   AlertTriangle, MousePointerClick, Zap, SlidersHorizontal, SquarePen, History, Trash2,
-  Eye, Globe, Brain, Users, Terminal, FileText, Wallet, Wrench, HelpCircle, Square, ChevronDown,
+  Eye, Globe, Brain, Users, Terminal, FileText, Wallet, Wrench, HelpCircle, Square, ChevronDown, Plus,
 } from 'lucide-react';
 import AgentMascot from '../components/AgentMascot';
 import ModelDropdown from '../components/ModelDropdown';
-import { agentChat, summarizeTurns, type ChatTurn, type ToolCall } from '../api/franklin';
+import { agentChat, summarizeTurns, type ChatTurn, type ChatContentPart, type ToolCall } from '../api/franklin';
+import { prepareImageForUpload } from '../lib/image-compress';
 import { TEXT_MODELS } from './nodes';
 import { useAgentPrefs, type AgentMode } from './agentPrefsStore';
 import { useAgentSessions, type TraceItem, type TraceStatus } from './agentSessionsStore';
@@ -55,6 +56,11 @@ export default function AgentPanel({ open, onClose, api }: Props) {
   const [optsOpen, setOptsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [model, setModel] = useState<string>(DEFAULT_AGENT_MODEL);
+
+  // Image attachment (vision). Compressed to a data URL before it's sent.
+  const [attachment, setAttachment] = useState<string | null>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const [trace, setTrace] = useState<TraceItem[]>([]);
   const [running, setRunning] = useState(false);
@@ -112,8 +118,21 @@ export default function AgentPanel({ open, onClose, api }: Props) {
     tid.current = 0;
     stopRef.current = false;
     setTrace([]); setInput(''); setRunning(false); setConfirm(null); setAwaitingAsk(false);
+    setAttachment(null); setAttachError(null);
     confirmResolver.current = null; askResolver.current = null;
     setHistoryOpen(false);
+  };
+
+  const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    setAttachError(null);
+    try {
+      setAttachment(await prepareImageForUpload(file));
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : 'Could not load that image.');
+    }
   };
 
   const loadSession = (id: string) => {
@@ -142,9 +161,13 @@ export default function AgentPanel({ open, onClose, api }: Props) {
 
   const send = () => {
     const text = input.trim();
-    if (!text) return;
+    const img = attachment;
+    if (!text && !img) return;
     setInput('');
-    // If the agent is waiting on an ask_user, this input answers it.
+    setAttachment(null);
+    setAttachError(null);
+    // If the agent is waiting on an ask_user, this input answers it. (ask_user
+    // expects a string answer, so an attached image is dropped here.)
     if (askResolver.current) {
       push({ kind: 'user', text });
       const r = askResolver.current; askResolver.current = null; setAwaitingAsk(false);
@@ -152,8 +175,15 @@ export default function AgentPanel({ open, onClose, api }: Props) {
       return;
     }
     if (running) return;
-    push({ kind: 'user', text });
-    turnsRef.current.push({ role: 'user', content: text });
+    push({ kind: 'user', text, ...(img ? { image: img } : {}) });
+    // Vision models take an OpenAI content-part array; text-only stays a string.
+    const content: string | ChatContentPart[] = img
+      ? [
+          ...(text ? [{ type: 'text' as const, text }] : []),
+          { type: 'image_url' as const, image_url: { url: img } },
+        ]
+      : text;
+    turnsRef.current.push({ role: 'user', content });
     void runLoop();
   };
 
@@ -164,7 +194,12 @@ export default function AgentPanel({ open, onClose, api }: Props) {
   // is compacted; the visible trace stays complete.
   const COMPACT_CHARS = 24000; // ~6k tokens of content before we compact
   const KEEP_RECENT = 8;
-  const turnsSize = (t: ChatTurn[]) => t.reduce((n, m) => n + (m.content?.length || 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0), 0);
+  const contentLen = (c: ChatTurn['content']): number => {
+    if (typeof c === 'string') return c.length;
+    if (Array.isArray(c)) return c.reduce((n, p) => n + (p.type === 'text' ? p.text.length : 2000), 0); // image ≈ fixed weight
+    return 0;
+  };
+  const turnsSize = (t: ChatTurn[]) => t.reduce((n, m) => n + contentLen(m.content) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0), 0);
   const compactIfNeeded = async () => {
     const turns = turnsRef.current;
     if (turnsSize(turns) < COMPACT_CHARS || turns.length <= KEEP_RECENT + 2) return;
@@ -284,7 +319,12 @@ export default function AgentPanel({ open, onClose, api }: Props) {
 
         {trace.map((t) => {
           if (t.kind === 'user') return (
-            <div key={t.id} className="agent-msg agent-msg-user"><div className="agent-msg-text">{t.text}</div></div>
+            <div key={t.id} className="agent-msg agent-msg-user">
+              <div className="agent-msg-bubble">
+                {t.image && <img src={t.image} alt="attachment" className="agent-msg-img" loading="lazy" />}
+                {t.text && <div className="agent-msg-text">{t.text}</div>}
+              </div>
+            </div>
           );
           if (t.kind === 'agent') return (
             <div key={t.id} className="agent-msg agent-msg-agent">
@@ -333,6 +373,13 @@ export default function AgentPanel({ open, onClose, api }: Props) {
       </div>
 
       <div className="agent-composer">
+        {attachment && (
+          <div className="agent-attach">
+            <img src={attachment} alt="attachment preview" />
+            <button className="agent-attach-x" onClick={() => setAttachment(null)} aria-label="Remove attachment"><X size={12} aria-hidden /></button>
+          </div>
+        )}
+        {attachError && <div className="agent-attach-error">{attachError}</div>}
         <textarea
           className="agent-input"
           value={input}
@@ -343,6 +390,8 @@ export default function AgentPanel({ open, onClose, api }: Props) {
           aria-label="Message the agent"
         />
         <div className="agent-composer-bar">
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onPickFile} />
+          <button type="button" className="agent-attach-btn" onClick={() => fileRef.current?.click()} aria-label="Attach image" title="Attach image"><Plus size={17} aria-hidden /></button>
           <div className="agent-opts-wrap">
             <button type="button" className={`agent-opts-btn ${optsOpen ? 'is-active' : ''}`} onClick={() => setOptsOpen((v) => !v)} aria-haspopup="dialog" aria-expanded={optsOpen} aria-label="Run mode and model" title="Run mode & model"><SlidersHorizontal size={16} aria-hidden /></button>
             {optsOpen && (

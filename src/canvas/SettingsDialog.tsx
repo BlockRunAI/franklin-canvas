@@ -267,7 +267,7 @@ function AboutPane() {
     <div className="settings-pane-section">
       <h2>{t('settings_section_about')}</h2>
       <div className="settings-about-brand">
-        <img src="/franklin-canvas-icon.png" alt="" aria-hidden />
+        <img src="/franklin-avatar.png" alt="" aria-hidden />
         <span>Franklin Canvas</span>
       </div>
       <p className="settings-foot-note">{t('about_blurb')}</p>

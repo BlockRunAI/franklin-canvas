@@ -18,6 +18,7 @@ import ModelDropdown from '../components/ModelDropdown';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
 import ImageSettingsPanel, { type ImageSettings, type ImageRatio, type ImageQuality } from './ImageSettingsPanel';
 import { getWallet } from '../api/franklin';
+import { prepareImageForUpload } from '../lib/image-compress';
 import { useT } from '../i18n';
 
 type Mode = 'imagegen' | 'videogen' | 'musicgen';
@@ -35,6 +36,16 @@ const MULTI_IMAGE_MODELS = new Set<string>([
   'google/nano-banana', 'google/nano-banana-pro',
 ]);
 
+// Seedance 2.0 adds "omni" multi-reference: instead of first/last frame, you
+// supply several reference images (character / style / scene). The two modes are
+// mutually exclusive per generation (see LibTV / Seedance docs), so for these
+// models the bar shows a First-Last ↔ References toggle. 1.5-pro is first/last
+// only and never sees the toggle.
+export const SEEDANCE_OMNI_MODELS = new Set<string>([
+  'bytedance/seedance-2.0', 'bytedance/seedance-2.0-fast',
+]);
+const MAX_OMNI_REFS = 9;
+
 interface Props {
   onSend: (payload: {
     nodeId: string | null;
@@ -48,6 +59,10 @@ interface Props {
      *  from img1 + subject from img2). For videogen → the LAST frame
      *  (first-and-last-frame interpolation, Seedance only). */
     referenceUrl2?: string | null;
+    /** Seedance 2.0 omni multi-reference images. Mutually exclusive with
+     *  referenceUrl/referenceUrl2 — set only when the user is in "References"
+     *  mode; null otherwise. */
+    referenceImageUrls?: string[] | null;
   }) => void;
 }
 
@@ -191,6 +206,10 @@ export default function PromptBar({ onSend }: Props) {
   const [attachment, setAttachment] = useState<string | null>(null);
   // Second reference: image fusion (imagegen) or last frame (videogen).
   const [attachment2, setAttachment2] = useState<string | null>(null);
+  // Seedance 2.0 omni multi-reference images, and which reference mode is active
+  // for this node ('frames' = first/last, 'refs' = omni multi-reference).
+  const [refImages, setRefImages] = useState<string[]>([]);
+  const [refMode, setRefMode] = useState<'frames' | 'refs'>('frames');
   // Settings popover state for the gear button. Same panel surface used on
   // the node, just anchored to the PromptBar so users can tweak size /
   // aspect / duration without clicking away from the prompt area.
@@ -240,6 +259,8 @@ export default function PromptBar({ onSend }: Props) {
       setModel(d.model ?? MODE_META[bound].models[0].id);
       setAttachment(d.referenceUrl ?? null);
       setAttachment2((d as { referenceUrl2?: string }).referenceUrl2 ?? null);
+      setRefImages((d as { referenceImageUrls?: string[] }).referenceImageUrls ?? []);
+      setRefMode((d as { refMode?: 'frames' | 'refs' }).refMode ?? 'frames');
     }
   }, [selectedNode?.id, bound]);
 
@@ -278,6 +299,29 @@ export default function PromptBar({ onSend }: Props) {
     if (selectedId) updateNodeData(selectedId, { referenceUrl2: undefined });
   };
 
+  // Omni multi-reference (Seedance 2.0): a growable list of reference images.
+  const fileRefOmni = useRef<HTMLInputElement>(null);
+  const setRefs = (next: string[]) => {
+    const capped = next.slice(0, MAX_OMNI_REFS);
+    setRefImages(capped);
+    if (selectedId) updateNodeData(selectedId, { referenceImageUrls: capped });
+  };
+  const addRef = (url: string) => setRefs([...refImages, url]);
+  const removeRefAt = (i: number) => setRefs(refImages.filter((_, idx) => idx !== i));
+  const onAttachOmniClick = () => fileRefOmni.current?.click();
+  const onAttachOmniFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => addRef(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+  const changeRefMode = (m: 'frames' | 'refs') => {
+    setRefMode(m);
+    if (selectedId) updateNodeData(selectedId, { refMode: m });
+  };
+
   // The bar is contextual to a generation node — hide it when nothing
   // relevant is selected.
   if (!bound) return null;
@@ -286,12 +330,21 @@ export default function PromptBar({ onSend }: Props) {
   const meta = MODE_META[mode];
   const ModeIcon = meta.icon;
 
+  // Seedance 2.0 supports the omni multi-reference mode (a list of refs) as an
+  // alternative to first/last frame. When such a model is selected the bar shows
+  // a mode toggle; `omniMode` is whether the user has switched to references.
+  const supportsOmni = mode === 'videogen' && SEEDANCE_OMNI_MODELS.has(model);
+  const omniMode = supportsOmni && refMode === 'refs';
+
   // A second image input is meaningful only for: image fusion (gpt-image /
   // nano-banana) and first-and-last-frame video (Seedance). Other models hide
-  // the slot and never receive a second reference.
+  // the slot and never receive a second reference. In omni mode there are no
+  // first/last slots at all.
   const supportsSecondImage =
-    (mode === 'imagegen' && MULTI_IMAGE_MODELS.has(model)) ||
-    (mode === 'videogen' && model.startsWith('bytedance/seedance'));
+    !omniMode && (
+      (mode === 'imagegen' && MULTI_IMAGE_MODELS.has(model)) ||
+      (mode === 'videogen' && model.startsWith('bytedance/seedance'))
+    );
   // Progressive disclosure: the 2nd slot only appears once the 1st is filled,
   // so the bar stays clean until you actually want a second reference.
   const showSecondSlot = supportsSecondImage && !!attachment;
@@ -304,8 +357,10 @@ export default function PromptBar({ onSend }: Props) {
     if (!prompt.trim()) return;
     onSend({
       nodeId: selectedId, mode, prompt, model,
-      referenceUrl: attachment,
+      // Omni and first/last are mutually exclusive — only send one set.
+      referenceUrl: omniMode ? null : attachment,
       referenceUrl2: supportsSecondImage ? attachment2 : null,
+      referenceImageUrls: omniMode ? refImages : null,
     });
   };
 
@@ -316,8 +371,44 @@ export default function PromptBar({ onSend }: Props) {
     }
   };
 
+  // Paste a clipboard image anywhere in the bar → drop it into the first empty
+  // reference slot (slot 2 only when this model supports a second image). The
+  // canvas-level paste handler defers to us (see CanvasView) so it won't also
+  // spawn an upload node.
+  const onPasteImage = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const it of Array.from(items)) {
+      if (!it.type.startsWith('image/')) continue;
+      const file = it.getAsFile();
+      if (!file) continue;
+      e.preventDefault();
+      let url: string;
+      try {
+        url = await prepareImageForUpload(file);
+      } catch {
+        return; // too large / unreadable — silently ignore, matches file picker
+      }
+      if (omniMode) {
+        if (refImages.length < MAX_OMNI_REFS) addRef(url);
+        return;
+      }
+      if (!attachment) {
+        setAttachment(url);
+        if (selectedId) updateNodeData(selectedId, { referenceUrl: url });
+      } else if (supportsSecondImage && !attachment2) {
+        setAttachment2(url);
+        if (selectedId) updateNodeData(selectedId, { referenceUrl2: url });
+      } else {
+        setAttachment(url);
+        if (selectedId) updateNodeData(selectedId, { referenceUrl: url });
+      }
+      return;
+    }
+  };
+
   return (
-    <div className="prompt-bar nodrag nopan" onClick={(e) => e.stopPropagation()}>
+    <div className="prompt-bar nodrag nopan" onClick={(e) => e.stopPropagation()} onPaste={onPasteImage}>
       {needsFunding && walletState && (
         <div className="prompt-bar-banner" role="status">
           <AlertCircle size={13} aria-hidden />
@@ -330,31 +421,87 @@ export default function PromptBar({ onSend }: Props) {
           </span>
         </div>
       )}
+      {/* Seedance 2.0: first/last frame ↔ omni references mode toggle. */}
+      {supportsOmni && (
+        <div className="pb-refmode" role="tablist" aria-label="Reference mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!omniMode}
+            className={`pb-refmode-tab ${!omniMode ? 'is-on' : ''}`}
+            onClick={() => changeRefMode('frames')}
+            title={t('pb_ref_frames_hint')}
+          >
+            {t('pb_ref_frames')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={omniMode}
+            className={`pb-refmode-tab ${omniMode ? 'is-on' : ''}`}
+            onClick={() => changeRefMode('refs')}
+            title={t('pb_ref_refs_hint')}
+          >
+            {t('pb_ref_refs')}
+          </button>
+        </div>
+      )}
       <div className="prompt-bar-top">
-        <ReferencePicker
-          attachment={attachment}
-          caption={captions?.[0]}
-          onPick={(url) => {
-            setAttachment(url);
-            if (selectedId) updateNodeData(selectedId, { referenceUrl: url });
-          }}
-          onClear={clearAttachment}
-          onUploadClick={onAttachClick}
-        />
-        <input ref={fileRef} type="file" accept="image/*" onChange={onAttachFile} hidden />
-        {showSecondSlot && (
+        {omniMode ? (
+          <div className="pb-ref-multi">
+            {refImages.map((url, i) => (
+              <div className="pb-ref-thumb pb-ref-thumb-static" key={i}>
+                <img src={url} alt="" />
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="pb-ref-thumb-x"
+                  aria-label="Remove reference"
+                  onClick={() => removeRefAt(i)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); removeRefAt(i); } }}
+                >
+                  <X size={9} aria-hidden />
+                </span>
+              </div>
+            ))}
+            {refImages.length < MAX_OMNI_REFS && (
+              <ReferencePicker
+                attachment={null}
+                onPick={addRef}
+                onClear={() => {}}
+                onUploadClick={onAttachOmniClick}
+              />
+            )}
+            <input ref={fileRefOmni} type="file" accept="image/*" onChange={onAttachOmniFile} hidden />
+          </div>
+        ) : (
           <>
             <ReferencePicker
-              attachment={attachment2}
-              caption={captions?.[1]}
+              attachment={attachment}
+              caption={captions?.[0]}
               onPick={(url) => {
-                setAttachment2(url);
-                if (selectedId) updateNodeData(selectedId, { referenceUrl2: url });
+                setAttachment(url);
+                if (selectedId) updateNodeData(selectedId, { referenceUrl: url });
               }}
-              onClear={clearAttachment2}
-              onUploadClick={onAttachClick2}
+              onClear={clearAttachment}
+              onUploadClick={onAttachClick}
             />
-            <input ref={fileRef2} type="file" accept="image/*" onChange={onAttachFile2} hidden />
+            <input ref={fileRef} type="file" accept="image/*" onChange={onAttachFile} hidden />
+            {showSecondSlot && (
+              <>
+                <ReferencePicker
+                  attachment={attachment2}
+                  caption={captions?.[1]}
+                  onPick={(url) => {
+                    setAttachment2(url);
+                    if (selectedId) updateNodeData(selectedId, { referenceUrl2: url });
+                  }}
+                  onClear={clearAttachment2}
+                  onUploadClick={onAttachClick2}
+                />
+                <input ref={fileRef2} type="file" accept="image/*" onChange={onAttachFile2} hidden />
+              </>
+            )}
           </>
         )}
         <div className="pb-flex" />

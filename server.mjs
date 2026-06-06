@@ -20,6 +20,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { Buffer } from 'node:buffer';
+import { fileURLToPath } from 'node:url';
 import {
   LLMClient,
   ImageClient,
@@ -34,7 +35,23 @@ import {
 } from '@blockrun/llm';
 import { runAgentChat, runBackendTool, describeMedia, summarizeConversation, listMemories, deleteMemory, CANVAS_TOOL_NAMES } from './agent-tools.mjs';
 
-const PORT = 3100;
+// PORT/HOST from env so the same process runs locally (127.0.0.1:3100) and on a
+// PaaS like Cloud Run (0.0.0.0:$PORT). HOST defaults to localhost for dev safety.
+const PORT = Number(process.env.PORT) || 3100;
+const HOST = process.env.HOST || '127.0.0.1';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Single-container deploy: when a built frontend exists, this server also serves
+// the SPA (dist/) so the API and the UI live on one origin (no CORS, one URL).
+const DIST_DIR = path.join(__dirname, 'dist');
+const SERVE_STATIC = fs.existsSync(path.join(DIST_DIR, 'index.html'));
+const STATIC_MIME = {
+  html: 'text/html; charset=utf-8', js: 'text/javascript', mjs: 'text/javascript',
+  css: 'text/css', json: 'application/json', svg: 'image/svg+xml', png: 'image/png',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+  ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf',
+  map: 'application/json', txt: 'text/plain; charset=utf-8', webmanifest: 'application/manifest+json',
+  mp4: 'video/mp4', mp3: 'audio/mpeg', wav: 'audio/wav',
+};
 const apiUrl = process.env.BLOCKRUN_API_URL || undefined;
 // Gateway origin for the manual x402 video submit+poll flow.
 const GATEWAY = process.env.BLOCKRUN_API_URL || 'https://blockrun.ai/api';
@@ -45,6 +62,9 @@ fs.mkdirSync(JOBS_DIR, { recursive: true });
 // so projects are portable / version-controllable / editable outside the browser.
 const PROJECTS_DIR = path.join(os.homedir(), '.franklin', 'projects');
 fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+
+// Agent chat sessions — file-backed (was localStorage-only, which got lost).
+const AGENT_SESSIONS_FILE = path.join(os.homedir(), '.franklin', 'agent-sessions.json');
 
 // CORS — wide open in dev so any Vite port can talk to :3100. In production,
 // set ALLOWED_ORIGINS to a comma-separated list of origins (or "*" if you
@@ -840,6 +860,34 @@ const server = http.createServer(async (req, res) => {
   const p = (req.url || '').split('?')[0];
 
   try {
+    // ── Transparent x402 gateway proxy (browser-pay / web build) ──
+    // The browser does the 402 → sign → retry dance itself and the server just
+    // forwards to the BlockRun gateway, passing through the X-Payment header and
+    // exposing the payment-required challenge back to the browser. NO wallet /
+    // key is used here — payment is entirely the visitor's wallet. This is what
+    // lets the web canvas charge each user instead of a shared server wallet.
+    if (p.startsWith('/api/gw/')) {
+      const qs = (req.url || '').includes('?') ? '?' + req.url.split('?').slice(1).join('?') : '';
+      const target = `${GATEWAY}${p.slice('/api/gw'.length)}${qs}`;
+      const fwd = {};
+      if (req.headers['content-type']) fwd['content-type'] = req.headers['content-type'];
+      if (req.headers['x-payment']) fwd['X-Payment'] = req.headers['x-payment'];
+      const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+      const body = hasBody ? await readBody(req) : undefined;
+      const upstream = await fetch(target, { method: req.method, headers: fwd, body });
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      const out = { ...corsHeaders(req) };
+      for (const h of ['content-type', 'payment-required', 'x-payment-required', 'www-authenticate', 'x-payment-response', 'cache-control']) {
+        const v = upstream.headers.get(h);
+        if (v) out[h] = v;
+      }
+      // Expose the challenge/response headers so the browser fetch can read them.
+      out['Access-Control-Expose-Headers'] = 'payment-required, x-payment-required, www-authenticate, x-payment-response';
+      res.writeHead(upstream.status, out);
+      res.end(buf);
+      return;
+    }
+
     if (p === '/api/wallet' && req.method === 'GET') {
       // Optional ?chain=base|solana — defaults to base. Spend history is
       // shared across chains (it lives in the BlockRun cost log) and isn't
@@ -1169,6 +1217,24 @@ const server = http.createServer(async (req, res) => {
       catch (err) { return json(req, res, { ok: false, error: String(err) }, 500); }
     }
 
+    if (p === '/api/agent-sessions' && req.method === 'GET') {
+      try {
+        let sessions = [];
+        if (fs.existsSync(AGENT_SESSIONS_FILE)) {
+          const parsed = JSON.parse(fs.readFileSync(AGENT_SESSIONS_FILE, 'utf8'));
+          if (Array.isArray(parsed)) sessions = parsed;
+        }
+        return json(req, res, { ok: true, sessions });
+      } catch (err) { return json(req, res, { ok: false, error: String(err), sessions: [] }, 500); }
+    }
+    if (p === '/api/agent-sessions' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body; try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      const sessions = Array.isArray(body.sessions) ? body.sessions : [];
+      try { fs.writeFileSync(AGENT_SESSIONS_FILE, JSON.stringify(sessions)); return json(req, res, { ok: true }); }
+      catch (err) { return json(req, res, { ok: false, error: String(err) }, 500); }
+    }
+
     if (p === '/api/prompts' && req.method === 'GET') {
       try {
         const items = await getPromptLibrary();
@@ -1212,14 +1278,36 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Serve the built frontend (single-container deploy). API routes are handled
+    // above; any other GET serves a static asset, falling back to the SPA's
+    // index.html for client-side routes.
+    if (SERVE_STATIC && req.method === 'GET' && !p.startsWith('/api/')) {
+      const rel = p === '/' ? '/index.html' : p;
+      let filePath = path.join(DIST_DIR, path.normalize(rel));
+      // Contain within DIST_DIR (no path traversal), then SPA-fallback.
+      if (!filePath.startsWith(DIST_DIR) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+        filePath = path.join(DIST_DIR, 'index.html');
+      }
+      const ext = path.extname(filePath).slice(1).toLowerCase();
+      // Vite content-hashes files under /assets/ → cache them forever; never
+      // cache index.html so a new deploy's hashed asset names are picked up.
+      const immutable = p.startsWith('/assets/');
+      res.writeHead(200, {
+        'Content-Type': STATIC_MIME[ext] || 'application/octet-stream',
+        'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+      });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+
     res.writeHead(404, corsHeaders(req)); res.end('Not found');
   } catch (err) {
     json(req, res, { ok: false, error: String(err) }, 500);
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Franklin Canvas backend on http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Franklin Canvas backend on http://${HOST}:${PORT}${SERVE_STATIC ? ' (serving dist/)' : ''}`);
   console.log('  GET  /api/wallet?chain=base|solana');
   console.log('  GET  /api/wallet/transactions');
   console.log('  POST /api/generate');
