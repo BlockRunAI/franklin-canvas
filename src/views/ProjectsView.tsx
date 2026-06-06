@@ -108,7 +108,7 @@ export default function ProjectsView({ onOpenCanvas }: Props) {
 
       {projects.length === 0 ? (
         <div className="projects-empty">
-          <img src="/franklin-canvas-icon.png" className="projects-empty-logo" alt="" aria-hidden />
+          <img src="/franklin-avatar.png" className="projects-empty-logo" alt="" aria-hidden />
           <p>No projects yet.</p>
           <button className="btn-primary" onClick={newProject}><Plus size={16} aria-hidden /> Create your first project</button>
         </div>

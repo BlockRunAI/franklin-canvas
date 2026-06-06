@@ -1463,6 +1463,8 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .canvas-add-row { display: flex; align-items: center; gap: 2px; list-style: none; padding: 0; margin: 0; }
 .canvas-add-row li { list-style: none; }
 .canvas-add-group-sep { width: 1px; align-self: stretch; margin: 4px 6px; background: var(--border); }
+.canvas-wallet-btn { border: 1px solid var(--border); border-radius: 8px; }
+.canvas-wallet-btn.is-connected { color: var(--accent, #c9a227); border-color: var(--accent-ring, var(--border)); }
 .canvas-add-btn {
   display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
   border: 0; background: transparent; color: var(--fg-dim);
@@ -1844,6 +1846,15 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .pb-ref-tile { width: 100%; aspect-ratio: 1; border-radius: 8px; border: 2px solid transparent; overflow: hidden; padding: 0; cursor: pointer; }
 .pb-ref-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pb-ref-tile.is-selected { border-color: var(--accent); }
+
+/* Seedance 2.0 reference-mode toggle (first/last ↔ omni references). */
+.pb-refmode { display: inline-flex; gap: 2px; padding: 2px; margin-bottom: 8px; border-radius: 10px; background: var(--panel-soft); border: 1px solid var(--border); width: fit-content; }
+.pb-refmode-tab { padding: 4px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--fg-dim); font-size: 12px; font-weight: 600; cursor: pointer; transition: background 0.14s ease, color 0.14s ease; }
+.pb-refmode-tab:hover { color: var(--fg); }
+.pb-refmode-tab.is-on { background: var(--bg-elevated); color: var(--fg); box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.12)); }
+/* Omni multi-reference: a wrapping row of reference thumbnails + an adder. */
+.pb-ref-multi { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pb-ref-thumb-static { cursor: default; }
 
 /* ── Preview dialog (Lightbox) ── */
 /* Windowed preview: image on the left, prompt + metadata on the right.
@@ -2334,6 +2345,17 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .agent-send { width: 34px; height: 34px; flex-shrink: 0; padding: 0; border: 0; border-radius: 9px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .agent-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Image attachment: a button in the composer bar, a preview thumbnail above the
+   textarea while one is staged, and an inline thumbnail in the sent message. */
+.agent-attach-btn { width: 30px; height: 30px; flex-shrink: 0; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: transparent; color: var(--fg-soft); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease; }
+.agent-attach-btn:hover { background: var(--panel-soft); color: var(--fg); border-color: var(--accent-ring); }
+.agent-attach { position: relative; width: 64px; height: 64px; margin: 4px 4px 0 6px; }
+.agent-attach img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); }
+.agent-attach-x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+.agent-attach-error { font-size: 11px; color: var(--err, #d9534f); padding: 4px 6px 0; }
+.agent-msg-bubble { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 84%; }
+.agent-msg-img { max-width: 200px; max-height: 200px; border-radius: 12px; border: 1px solid var(--border); object-fit: cover; }
+
 /* Agent options: one button in the input row, reveals run-mode + planner on click */
 .agent-opts-wrap { position: relative; flex-shrink: 0; }
 .agent-opts-btn { width: 34px; height: 34px; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); color: var(--fg-dim); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
@@ -2545,7 +2567,15 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .projects-head-text { flex: 1; min-width: 0; }
 .projects-head h1 { font-size: 22px; font-weight: 650; color: var(--fg); margin: 0 0 4px; }
 .projects-head p { color: var(--fg-dim); font-size: 13px; margin: 0; }
-.projects-new { flex-shrink: 0; }
+.projects-new {
+  flex-shrink: 0;
+  /* Brand gold — nicer than the light theme's dark petrol accent for this CTA. */
+  background: linear-gradient(135deg, #c9a227 0%, #d8be58 100%);
+  border-color: transparent;
+  color: #1b1b1f;
+  box-shadow: 0 2px 12px rgba(201, 162, 39, 0.28);
+}
+.projects-new:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 4px 18px rgba(201, 162, 39, 0.4); }
 .projects-back {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 7px 12px; border-radius: 999px;
@@ -2603,8 +2633,9 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .project-counts span { display: inline-flex; align-items: center; gap: 3px; }
 .project-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.14s ease; }
 .project-card:hover .project-actions { opacity: 1; }
-.project-actions button { width: 28px; height: 28px; padding: 0; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: rgba(12,12,14,0.78); backdrop-filter: blur(8px); border: 1px solid var(--border); color: var(--fg-dim); }
-.project-actions button:hover { color: var(--fg); background: rgba(12,12,14,0.92); }
+.project-actions button { width: 30px; height: 30px; padding: 0; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); border: 1px solid rgba(0,0,0,0.06); color: #444; box-shadow: 0 2px 8px rgba(0,0,0,0.16); transition: background 0.14s ease, color 0.14s ease; }
+.project-actions button:hover { background: #fff; color: #111; }
+.project-actions button:last-child:hover { color: #d23f31; } /* delete → red */
 
 /* ── Timeline node ── */
 /* ── Timeline / Playlist — horizontal time-axis playlist ──

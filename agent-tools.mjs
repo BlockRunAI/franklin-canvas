@@ -761,13 +761,20 @@ export async function runAgentChat({ model, messages, defaults }, ctx) {
 // (auto-compact). The frontend feeds the early turns here when history grows too
 // large, then replaces them with the returned summary to keep the context lean.
 export async function summarizeConversation(messages, ctx) {
+  // Flatten OpenAI multimodal content (string | content-part array) to plain text
+  // for the transcript — image parts become a short placeholder.
+  const flatten = (c) => {
+    if (typeof c === 'string') return c;
+    if (Array.isArray(c)) return c.map((p) => (p?.type === 'text' ? p.text : p?.type === 'image_url' ? '[image]' : '')).join(' ');
+    return '';
+  };
   const transcript = (Array.isArray(messages) ? messages : []).map((m) => {
     if (m.role === 'assistant' && m.tool_calls?.length) {
       const calls = m.tool_calls.map((c) => `${c.function?.name}(${clamp(String(c.function?.arguments || ''), 200)})`).join(', ');
-      return `ASSISTANT called: ${calls}${m.content ? `\nASSISTANT: ${m.content}` : ''}`;
+      return `ASSISTANT called: ${calls}${m.content ? `\nASSISTANT: ${flatten(m.content)}` : ''}`;
     }
     if (m.role === 'tool') return `TOOL RESULT (${m.name}): ${clamp(String(m.content || ''), 500)}`;
-    return `${String(m.role).toUpperCase()}: ${m.content || ''}`;
+    return `${String(m.role).toUpperCase()}: ${flatten(m.content)}`;
   }).join('\n');
   const sys = `You compress the earlier part of an AI media-studio agent conversation into a brief running memory. PRESERVE: the user's overall goal; every asset created (node id + media kind + result_url + model); key creative decisions; and any unfinished tasks. Drop chit-chat. Output concise plain-text notes (<= 250 words).`;
   const client = llm(ctx);

@@ -38,7 +38,7 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
     >
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark">
-          <img src="/franklin-canvas-icon.png" className="brand-logo" alt="" aria-hidden />
+          <img src="/franklin-avatar.png" className="brand-logo" alt="" aria-hidden />
           <span>{t('sidebar_brand')}</span>
         </span>
         {onToggleCollapse && (

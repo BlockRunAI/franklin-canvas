@@ -15,6 +15,7 @@ export interface TraceItem {
   id: number;
   kind: 'user' | 'agent' | 'tool';
   text?: string;        // user/agent message text
+  image?: string;       // optional attached image (data URL) on a user message
   tool?: string;        // tool name (kind === 'tool')
   label?: string;       // display label for the tool call
   status?: TraceStatus; // tool execution status
@@ -73,3 +74,34 @@ export const useAgentSessions = create<AgentSessionsState>()(
     },
   ),
 );
+
+// ── Durable file backing (via the canvas backend) ──
+// localStorage is a fast cache but gets lost (cache clear / Electron). The file
+// at ~/.franklin/agent-sessions.json is the durable source. Hydrate from it on
+// boot (overrides the cache if the file has data), then mirror every change.
+
+/** Call before mount (main.tsx). Pulls file-authoritative sessions into the store. */
+export async function hydrateAgentSessionsFromFile(): Promise<void> {
+  try {
+    const r = await fetch('/api/agent-sessions');
+    if (!r.ok) return;
+    const data = (await r.json()) as { sessions?: AgentSession[] };
+    if (Array.isArray(data.sessions) && data.sessions.length > 0) {
+      useAgentSessions.setState({ sessions: data.sessions });
+    }
+  } catch { /* offline → keep localStorage cache */ }
+}
+
+// Mirror store → file on change (debounced). The first write after a cache loss
+// pushes whatever we have up; after hydrate it keeps the file in sync.
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+useAgentSessions.subscribe((st) => {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    fetch('/api/agent-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessions: st.sessions }),
+    }).catch(() => {});
+  }, 500);
+});

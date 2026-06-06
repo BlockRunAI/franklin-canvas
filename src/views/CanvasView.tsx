@@ -22,7 +22,7 @@ import AgentPanel from '../canvas/AgentPanel';
 import AgentMascot from '../components/AgentMascot';
 import { useAgentPrefs } from '../canvas/agentPrefsStore';
 import { EDGE_TYPES } from '../canvas/edges';
-import PromptBar from '../canvas/PromptBar';
+import PromptBar, { SEEDANCE_OMNI_MODELS } from '../canvas/PromptBar';
 import PromptLibrary from '../canvas/PromptLibrary';
 import CollectionsPanel from '../canvas/CollectionsPanel';
 import AnnotateModal from '../canvas/AnnotateModal';
@@ -30,7 +30,9 @@ import { type FavItem } from '../collectionsStore';
 import CanvasViewBar from '../canvas/CanvasViewBar';
 import { usePrefsStore } from '../canvas/prefsStore';
 import { CanvasContext, type ImageEditOp } from '../canvas/CanvasContext';
-import { generate, stitchComparison, concatVideos, describeMedia, type StitchItem } from '../api/franklin';
+import { stitchComparison, concatVideos, describeMedia, type StitchItem } from '../api/franklin';
+import { useGenerate } from '../payments/use-generate';
+import ConnectWallet from '../components/ConnectWallet';
 import type { CanvasAgentApi } from '../canvas/agentTools';
 import { getOrCreateCurrent, saveProjectCanvas, renameProject } from '../projects';
 import { useUiStore } from '../uiStore';
@@ -104,6 +106,8 @@ function CanvasInner() {
   // Load the current project (created with the demo seed for first-time users).
   // CanvasView remounts on route change, so opening a project from the
   // Projects view lands us on that project's canvas. Lazy init runs once.
+  // Generation entrypoint — browser-pay (web) or backend-pay (desktop) by build.
+  const runGenerate = useGenerate();
   const [project] = useState(() => getOrCreateCurrent({ nodes: INITIAL_NODES, edges: INITIAL_EDGES }));
   const projectIdRef = useRef(project.id);
   const [nodes, setNodes, onNodesChange] = useNodesState(project.nodes);
@@ -302,6 +306,9 @@ function CanvasInner() {
       if (!e.clipboardData) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      // The prompt bar handles its own paste → image goes to the reference slot,
+      // not a new upload node on the canvas.
+      if (target && target.closest('.prompt-bar')) return;
       for (const item of Array.from(e.clipboardData.items)) {
         if (!item.type.startsWith('image/')) continue;
         const file = item.getAsFile();
@@ -506,6 +513,8 @@ function CanvasInner() {
       lyricsMode?: 'adaptive' | 'custom';
       referenceUrl?: string;
       referenceUrl2?: string;
+      referenceImageUrls?: string[];
+      refMode?: 'frames' | 'refs';
     };
 
     let cancelled = false;
@@ -539,16 +548,24 @@ function CanvasInner() {
     const rawRef2 = supportsSecondImage ? d.referenceUrl2 : undefined;
     const imageUrl2 = await shrinkReference(rawRef2, mode === 'videogen' ? 768 : 1024);
 
+    // Seedance 2.0 omni multi-reference: when the node is in 'refs' mode, send the
+    // reference image list INSTEAD of first/last frame (mutually exclusive).
+    const omni = mode === 'videogen' && d.refMode === 'refs' && SEEDANCE_OMNI_MODELS.has(effModel);
+    const referenceImageUrls = omni
+      ? ((await Promise.all((d.referenceImageUrls ?? []).map((u) => shrinkReference(u, 768)))).filter(Boolean) as string[])
+      : undefined;
+
     const kindMap = { imagegen: 'image', videogen: 'video', musicgen: 'music' } as const;
-    const result = await generate({
+    const result = await runGenerate({
       kind: kindMap[mode],
       prompt,
       model: modelOverride ?? d.model,
       durationS: mode === 'videogen' ? (d.durationS ?? 5) : mode === 'musicgen' ? (d.durationS ?? 8) : undefined,
       lyrics: mode === 'musicgen' && d.lyricsMode === 'custom' ? d.lyrics : undefined,
       instrumental: mode === 'musicgen' ? !d.lyrics && d.lyricsMode === 'adaptive' ? false : undefined : undefined,
-      imageUrl,
-      imageUrl2,
+      imageUrl: omni ? undefined : imageUrl,
+      imageUrl2: omni ? undefined : imageUrl2,
+      referenceImageUrls,
       // Gateway params from the node's settings panel. Aspect ratio applies to
       // both image and video; quality is image-only; resolution/audio video-only.
       aspectRatio: (mode === 'videogen' || mode === 'imagegen') ? d.ratio : undefined,
@@ -620,14 +637,19 @@ function CanvasInner() {
     model: string;
     referenceUrl: string | null;
     referenceUrl2?: string | null;
+    referenceImageUrls?: string[] | null;
   }) => {
     const ref = payload.referenceUrl || undefined;
     const ref2 = payload.referenceUrl2 || undefined;
+    // Omni refs vs first/last are mutually exclusive — when omni is set, clear
+    // the frame refs on the node so a stale first frame doesn't leak through.
+    const refImgs = payload.referenceImageUrls && payload.referenceImageUrls.length ? payload.referenceImageUrls : undefined;
+    const refMode: 'frames' | 'refs' = refImgs ? 'refs' : 'frames';
     if (payload.nodeId) {
       const target = nodes.find((n) => n.id === payload.nodeId);
       if (target && target.type === payload.mode) {
         setNodes((nds) => nds.map((n) => (n.id === payload.nodeId
-          ? { ...n, data: { ...n.data, prompt: payload.prompt, model: payload.model, referenceUrl: ref, referenceUrl2: ref2, status: 'running', progress: 0 } }
+          ? { ...n, data: { ...n.data, prompt: payload.prompt, model: payload.model, referenceUrl: ref, referenceUrl2: ref2, referenceImageUrls: refImgs, refMode, status: 'running', progress: 0 } }
           : n)));
         void simulateGen(payload.nodeId, payload.mode, payload.prompt, ref);
         return;
@@ -642,7 +664,7 @@ function CanvasInner() {
       id,
       type: entry.type,
       position: { x, y },
-      data: { ...entry.defaultData, prompt: payload.prompt, model: payload.model, referenceUrl: ref, referenceUrl2: ref2, status: 'idle' as NodeStatus },
+      data: { ...entry.defaultData, prompt: payload.prompt, model: payload.model, referenceUrl: ref, referenceUrl2: ref2, referenceImageUrls: refImgs, refMode, status: 'idle' as NodeStatus },
     };
     setNodes((nds) => [...nds, newNode]);
     void simulateGen(id, payload.mode, payload.prompt, ref);
@@ -1033,6 +1055,7 @@ function CanvasInner() {
           })}
         </ul>
         <span className="canvas-toolbar-spacer" />
+        <ConnectWallet />
         <button
           type="button"
           className="canvas-add-btn"
