@@ -195,11 +195,10 @@ export default function PromptBar({ onSend }: Props) {
   // the node, just anchored to the PromptBar so users can tweak size /
   // aspect / duration without clicking away from the prompt area.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Wallet snapshot (null while loading). Wallet is auto-created on first
-  // /api/wallet call, so `address` is always non-empty once loaded — the
-  // banner now nudges users to FUND the address, not to set one up.
+  // Billing snapshot (null while loading). Account mode has no browser-visible
+  // credential or wallet address; wallet mode shows a funding hint if needed.
   const [walletState, setWalletState] = useState<{
-    address: string; balanceUsdc: number; isNew: boolean; network: string;
+    address: string; balanceUsdc: number | null; isNew: boolean; network: string; authMode?: 'api-key' | 'wallet';
   } | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -209,17 +208,16 @@ export default function PromptBar({ onSend }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        // Prefer Base by default; only fall back to Solana if Base errored.
-        const w = await getWallet('base').catch(() => null);
+        const w = await getWallet('solana').catch(() => null);
         if (cancelled) return;
-        if (w?.address) {
-          setWalletState({ address: w.address, balanceUsdc: w.balanceUsdc, isNew: !!w.isNew, network: w.network });
+        if (w) {
+          setWalletState({ address: w.address, balanceUsdc: w.balanceUsdc, isNew: !!w.isNew, network: w.network, authMode: w.authMode });
         }
       } catch { /* leave null */ }
     })();
     return () => { cancelled = true; };
   }, []);
-  const needsFunding = walletState !== null && walletState.balanceUsdc < 0.01;
+  const needsFunding = walletState?.authMode !== 'api-key' && typeof walletState?.balanceUsdc === 'number' && walletState.balanceUsdc < 0.01;
   const shortAddr = walletState?.address
     ? `${walletState.address.slice(0, 6)}…${walletState.address.slice(-4)}`
     : '';
@@ -457,7 +455,7 @@ export default function PromptBar({ onSend }: Props) {
         <div className="pb-flex" />
         <div
           className="pb-cost"
-          title="Estimated USDC cost for this run, settled via x402 on Base"
+          title={walletState?.authMode === 'api-key' ? 'Estimated cost charged to your BlockRun account' : 'Estimated USDC cost, settled via x402 on Solana or Base'}
         >
           <span className="pb-cost-symbol">USDC</span>
           <span className="pb-cost-n">

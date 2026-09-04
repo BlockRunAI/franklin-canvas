@@ -1,8 +1,7 @@
 // Franklin Canvas self-contained backend.
 //
-// Wallet, x402 payment, and image / music / video generation all run in this
-// process via the @blockrun/llm SDK. The wallet file lives under
-// ~/.blockrun/ (shared with Franklin if both are installed).
+// Account API or wallet/x402 billing and image / music / video generation all
+// run in this process via the @blockrun/llm SDK. Credentials stay server-side.
 //
 // Endpoints:
 //   GET  /api/wallet?chain=base|solana   — address, USDC balance, spend
@@ -24,6 +23,7 @@ import {
   LLMClient,
   ImageClient,
   MusicClient,
+  VideoClient,
   SolanaLLMClient,
   getOrCreateWallet,
   getOrCreateSolanaWallet,
@@ -33,8 +33,9 @@ import {
   createPaymentPayload,
 } from '@blockrun/llm';
 import { runAgentChat, runBackendTool, describeMedia, summarizeConversation, listMemories, deleteMemory, CANVAS_TOOL_NAMES } from './agent-tools.mjs';
+import { billingContext, isAccountMode, ACCOUNT_PORTAL, ACCOUNT_KEYS_URL, ACCOUNT_CREDITS_URL } from './account-auth.mjs';
 
-const PORT = 3100;
+const PORT = Number(process.env.PORT || 3100);
 const apiUrl = process.env.BLOCKRUN_API_URL || undefined;
 // Gateway origin for the manual x402 video submit+poll flow.
 const GATEWAY = process.env.BLOCKRUN_API_URL || 'https://blockrun.ai/api';
@@ -154,16 +155,27 @@ function diffSpend(before, after) {
   return Math.max(0, a - b);
 }
 
+function getBillingContext() {
+  const account = billingContext();
+  if (account.authMode === 'api-key') return account;
+  const wallet = getWallet();
+  if (!wallet.privateKey) throw new Error('No wallet found. Set SOLANA_WALLET_KEY or BASE_CHAIN_WALLET_KEY.');
+  return {
+    authMode: 'wallet',
+    ...wallet,
+    clientOptions: { privateKey: wallet.privateKey, apiUrl },
+  };
+}
+
 async function generateImage(body, jobId) {
-  const { privateKey } = await getWallet();
-  if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.');
-  const client = new ImageClient({ privateKey, apiUrl });
+  const ctx = getBillingContext();
+  const client = new ImageClient(ctx.clientOptions);
   const opts = { model: body.model || 'google/nano-banana' };
   // Map the node's aspect ratio to an output size, and pass quality through.
   const IMG_SIZE = { '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792', '4:3': '1024x768', '3:4': '768x1024' };
   if (body.aspectRatio && IMG_SIZE[body.aspectRatio]) opts.size = IMG_SIZE[body.aspectRatio];
   if (body.quality === 'standard' || body.quality === 'hd') opts.quality = body.quality;
-  const before = client.getSpending?.();
+  const before = ctx.authMode === 'wallet' ? client.getSpending?.() : undefined;
   // Two reference images → multi-image fusion (the gateway's image2image `image`
   // field accepts an array; the SDK forwards it verbatim). e.g. style from img1
   // + subject from img2. One image → normal image-to-image. None → text-to-image.
@@ -171,31 +183,30 @@ async function generateImage(body, jobId) {
   const result = body.imageUrl
     ? await client.edit(body.prompt, editImages, opts)
     : await client.generate(body.prompt, opts);
-  const after = client.getSpending?.();
+  const after = ctx.authMode === 'wallet' ? client.getSpending?.() : undefined;
   const remoteUrl = result?.data?.[0]?.url;
   if (!remoteUrl) throw new Error('Image gateway returned no URL');
   const { ext } = await downloadTo(remoteUrl, path.join(JOBS_DIR, jobId), 'png');
-  const costUsd = diffSpend(before, after);
-  appendCostLog({ endpoint: body.imageUrl ? '/v1/images/edits' : '/v1/images/generations', costUsd, model: opts.model, wallet: client.getWalletAddress?.(), kind: 'ImageClient' });
+  const costUsd = ctx.authMode === 'wallet' ? diffSpend(before, after) : null;
+  if (ctx.authMode === 'wallet') appendCostLog({ endpoint: body.imageUrl ? '/v1/images/edits' : '/v1/images/generations', costUsd, model: opts.model, wallet: ctx.address, kind: 'ImageClient' });
   return { resultUrl: `/api/generated/${jobId}.${ext}`, costUsd };
 }
 
 async function generateMusic(body, jobId) {
-  const { privateKey } = await getWallet();
-  if (!privateKey) throw new Error('No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.');
-  const client = new MusicClient({ privateKey, apiUrl });
+  const ctx = getBillingContext();
+  const client = new MusicClient(ctx.clientOptions);
   const opts = { model: body.model || 'minimax/music-2.5+' };
   if (body.durationS) opts.durationSeconds = body.durationS;
   if (body.lyrics) opts.lyrics = body.lyrics;
   if (typeof body.instrumental === 'boolean') opts.instrumental = body.instrumental;
-  const before = client.getSpending?.();
+  const before = ctx.authMode === 'wallet' ? client.getSpending?.() : undefined;
   const result = await client.generate(body.prompt, opts);
-  const after = client.getSpending?.();
+  const after = ctx.authMode === 'wallet' ? client.getSpending?.() : undefined;
   const remoteUrl = result?.data?.[0]?.url;
   if (!remoteUrl) throw new Error('Music gateway returned no URL');
   const { ext } = await downloadTo(remoteUrl, path.join(JOBS_DIR, jobId), 'mp3');
-  const costUsd = diffSpend(before, after);
-  appendCostLog({ endpoint: '/v1/audio/generations', costUsd, model: opts.model, wallet: client.getWalletAddress?.(), kind: 'MusicClient' });
+  const costUsd = ctx.authMode === 'wallet' ? diffSpend(before, after) : null;
+  if (ctx.authMode === 'wallet') appendCostLog({ endpoint: '/v1/audio/generations', costUsd, model: opts.model, wallet: ctx.address, kind: 'MusicClient' });
   return { resultUrl: `/api/generated/${jobId}.${ext}`, costUsd };
 }
 
@@ -244,6 +255,27 @@ async function signVideoPayment(response, endpoint, privateKey, address) {
 // identity on each poll and settles on the first completed response. (The SDK's
 // VideoClient.generate auto-poll omits this header → "Poll failed: HTTP 402".)
 async function generateVideo(body, jobId) {
+  const account = billingContext();
+  if (account.authMode === 'api-key') {
+    const client = new VideoClient(account.clientOptions);
+    const result = await client.generate(body.prompt, {
+      model: body.model || 'bytedance/seedance-2.0',
+      ...(body.imageUrl ? { imageUrl: body.imageUrl } : {}),
+      ...(body.imageUrl2 ? { lastFrameUrl: body.imageUrl2 } : {}),
+      ...(Array.isArray(body.referenceImageUrls) && body.referenceImageUrls.length ? { referenceImageUrls: body.referenceImageUrls } : {}),
+      ...(body.durationS ? { durationSeconds: body.durationS } : {}),
+      ...(body.aspectRatio ? { aspectRatio: body.aspectRatio } : {}),
+      ...(body.resolution ? { resolution: body.resolution } : {}),
+      ...(typeof body.generateAudio === 'boolean' ? { generateAudio: body.generateAudio } : {}),
+      ...(typeof body.seed === 'number' ? { seed: body.seed } : {}),
+      ...(typeof body.watermark === 'boolean' ? { watermark: body.watermark } : {}),
+      ...(typeof body.returnLastFrame === 'boolean' ? { returnLastFrame: body.returnLastFrame } : {}),
+    });
+    const remoteUrl = result?.data?.[0]?.url;
+    if (!remoteUrl) throw new Error('Video gateway returned no URL');
+    const { ext } = await downloadTo(remoteUrl, path.join(JOBS_DIR, jobId), 'mp4');
+    return { resultUrl: `/api/generated/${jobId}.${ext}`, costUsd: null };
+  }
   const phaseT0 = Date.now();
   const phase = {}; // submitMs / firstQueuedMs / firstProgressMs / completedMs / downloadMs
   const { privateKey, address } = getWallet();
@@ -800,8 +832,8 @@ function extractJsonObject(text) {
 }
 
 async function planWorkflow(prompt, history, model) {
-  const { privateKey } = getWallet();
-  const client = new LLMClient({ privateKey, apiUrl });
+  const ctx = getBillingContext();
+  const client = new LLMClient(ctx.clientOptions);
   const planModel = typeof model === 'string' && AGENT_TEXT_MODELS.has(model) ? model : AGENT_PLAN_MODEL;
   const messages = [{ role: 'system', content: AGENT_SYSTEM }];
   for (const h of (Array.isArray(history) ? history : []).slice(-6)) {
@@ -841,12 +873,23 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (p === '/api/wallet' && req.method === 'GET') {
-      // Optional ?chain=base|solana — defaults to base. Spend history is
+      if (isAccountMode()) {
+        // Validate configuration without returning or logging the credential.
+        billingContext();
+        return json(req, res, {
+          authMode: 'api-key', address: '', balanceUsdc: null,
+          recentSpendUsd: null, totalSpendUsd: null,
+          network: 'Account API', chain: 'account', isNew: false,
+          spendByCategory: [], portalUrl: ACCOUNT_PORTAL,
+          keysUrl: ACCOUNT_KEYS_URL, creditsUrl: ACCOUNT_CREDITS_URL,
+        });
+      }
+      // Optional ?chain=solana|base — defaults to Solana. Spend history is
       // shared across chains (it lives in the BlockRun cost log) and isn't
       // chain-tagged, so both branches return the same recent/total/byModel
       // figures — only the wallet address + on-chain balance differ.
       const url = new URL(req.url, 'http://localhost');
-      const chain = (url.searchParams.get('chain') || 'base').toLowerCase() === 'solana' ? 'solana' : 'base';
+      const chain = (url.searchParams.get('chain') || 'solana').toLowerCase() === 'base' ? 'base' : 'solana';
       try {
         const wallet = chain === 'solana' ? await getSolanaWallet() : getWallet();
         const { address, privateKey, isNew } = wallet;
@@ -897,6 +940,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/wallet/transactions' && req.method === 'GET') {
+      if (isAccountMode()) return json(req, res, []);
       try {
         const logPath = SHARED_COST_LOG;
         if (!fs.existsSync(logPath)) return json(req, res, []);
@@ -982,9 +1026,8 @@ const server = http.createServer(async (req, res) => {
       let body;
       try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
       try {
-        const { privateKey, address } = getWallet();
-        if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found. Run `franklin wallet init` or set BASE_CHAIN_WALLET_KEY.' }, 400);
-        const out = await runAgentChat({ model: body.model, messages: body.messages, defaults: body.defaults }, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        const ctx = getBillingContext();
+        const out = await runAgentChat({ model: body.model, messages: body.messages, defaults: body.defaults }, { ...ctx, apiUrl, jobsDir: JOBS_DIR });
         // Debug: log exactly which tools the model asked for (name + args) so we
         // can see the agent's run history. Written to a file (immediate flush).
         try {
@@ -1011,8 +1054,8 @@ const server = http.createServer(async (req, res) => {
       const name = body.name;
       if (CANVAS_TOOL_NAMES.has(name)) return json(req, res, { ok: false, error: `${name} is a canvas tool (executed client-side)` }, 400);
       try {
-        const { privateKey, address } = getWallet();
-        const output = await runBackendTool(name, body.input || {}, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        const ctx = getBillingContext();
+        const output = await runBackendTool(name, body.input || {}, { ...ctx, apiUrl, jobsDir: JOBS_DIR });
         return json(req, res, { ok: true, output: String(output ?? '') });
       } catch (err) {
         // Tool errors are non-fatal — the model sees them as an is_error result.
@@ -1027,9 +1070,8 @@ const server = http.createServer(async (req, res) => {
       let body;
       try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
       try {
-        const { privateKey, address } = getWallet();
-        if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found.' }, 400);
-        const summary = await summarizeConversation(body.messages, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        const ctx = getBillingContext();
+        const summary = await summarizeConversation(body.messages, { ...ctx, apiUrl, jobsDir: JOBS_DIR });
         return json(req, res, { ok: true, summary });
       } catch (err) {
         console.warn(`[agent] summarize FAIL: ${err.message || err}`);
@@ -1062,9 +1104,8 @@ const server = http.createServer(async (req, res) => {
       let body;
       try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
       try {
-        const { privateKey, address } = getWallet();
-        if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found.' }, 400);
-        const text = await describeMedia({ imageUrl: body.imageUrl, question: body.question }, { privateKey, address, apiUrl, jobsDir: JOBS_DIR });
+        const ctx = getBillingContext();
+        const text = await describeMedia({ imageUrl: body.imageUrl, question: body.question }, { ...ctx, apiUrl, jobsDir: JOBS_DIR });
         return json(req, res, { ok: true, text });
       } catch (err) {
         console.warn(`[agent] describe FAIL: ${err.message || err}`);
@@ -1083,9 +1124,8 @@ const server = http.createServer(async (req, res) => {
       if (!texts.length) return json(req, res, { ok: true, translations: [] });
       const target = body.target === 'zh' ? 'Simplified Chinese' : 'English';
       try {
-        const { privateKey } = getWallet();
-        if (!privateKey) return json(req, res, { ok: false, error: 'No wallet found.' }, 400);
-        const client = new LLMClient({ privateKey, apiUrl });
+        const ctx = getBillingContext();
+        const client = new LLMClient(ctx.clientOptions);
         const sys = `You are a translator. Translate each string in the input JSON array to natural ${target}. Preserve any leading numbering like "例 104:" as "Example 104:". Return ONLY a JSON array of strings — same length and order as the input, no commentary.`;
         const resp = await client.chatCompletion('anthropic/claude-haiku-4.5',
           [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify(texts) }],
@@ -1138,10 +1178,6 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (p === '/api/health' && req.method === 'GET') {
-      return json(req, res, { ok: true });
-    }
-
     // ── Project files (on-disk canvas persistence) ──
     if (p === '/api/projects' && req.method === 'GET') {
       try {
@@ -1167,6 +1203,13 @@ const server = http.createServer(async (req, res) => {
       const safe = String(body.id || '').replace(/[^a-zA-Z0-9_-]/g, '');
       try { if (safe) fs.rmSync(path.join(PROJECTS_DIR, `${safe}.json`), { force: true }); return json(req, res, { ok: true }); }
       catch (err) { return json(req, res, { ok: false, error: String(err) }, 500); }
+    }
+
+    if (p === '/api/health' && req.method === 'GET') {
+      const account = billingContext();
+      return json(req, res, account.authMode === 'api-key'
+        ? { ok: true, authMode: 'api-key', portalUrl: ACCOUNT_PORTAL, creditsUrl: ACCOUNT_CREDITS_URL }
+        : { ok: true, authMode: 'wallet' });
     }
 
     if (p === '/api/prompts' && req.method === 'GET') {

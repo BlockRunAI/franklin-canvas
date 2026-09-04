@@ -3,13 +3,13 @@
 <p align="center">
 A node-based AI media studio — generate <strong>images, video and music</strong> on an
 infinite canvas, chain them into visual workflows, and let an <strong>AI agent</strong> build them for you.
-<br/><sub>Pay-per-use in USDC via x402 — no subscription, no API keys.</sub>
+<br/><sub>Use a BlockRun API key or pay per request in USDC via x402 — no subscription.</sub>
 </p>
 
 <p align="center">
 <a href="https://github.com/BlockRunAI/franklin-canvas/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
 <a href="https://github.com/BlockRunAI/Franklin"><img alt="Built on Franklin" src="https://img.shields.io/badge/built%20on-Franklin-a3e635.svg"></a>
-<img alt="Chains" src="https://img.shields.io/badge/chains-Base%20%C2%B7%20Solana-cba.svg">
+<img alt="Chains" src="https://img.shields.io/badge/chains-Solana%20%C2%B7%20Base-cba.svg">
 <img alt="x402" src="https://img.shields.io/badge/payment-x402-blue.svg">
 </p>
 
@@ -18,14 +18,13 @@ https://github.com/user-attachments/assets/7bbced39-90fd-4fb8-9346-83c0a52d6e49
 <p align="center"><sub>▶︎ The 3-feature demo — prompt library · one-sentence AI short film · model comparison</sub></p>
 
 > **Franklin Canvas is live — and fully open source.** If it's useful, please ⭐️ the repo.
-> To try it, [clone & run](#quick-start) and top up the auto-created wallet with a little **USDC** (pay-per-use, no subscription).
+> To try it, [clone & run](#quick-start) and create a free [BlockRun account](https://user.blockrun.ai), add credits, and set an API key (pay-per-use, no subscription).
 
 Drop a node, type a prompt, hit Send — then wire nodes into a workflow (image → animate →
 stitch), or just describe what you want and let the **Media Agent** build it on the canvas.
 An infinite canvas for **image, video and music**, with side-by-side **model comparison**,
-in-canvas editing, a 848-case prompt library, timeline, and three themes. Generations pay
-per call from a local wallet (built on the [Franklin core](https://github.com/BlockRunAI/Franklin)
-SDK) — no subscription, no account, no API keys.
+in-canvas editing, a 848-case prompt library, timeline, and three themes. Generations use BlockRun account credits or pay per call from a local Solana/Base wallet
+(built on the [Franklin core](https://github.com/BlockRunAI/Franklin) SDK).
 
 ## Demos
 
@@ -100,41 +99,41 @@ SDK) — no subscription, no account, no API keys.
 - **Projects.** Each project is its own saved canvas; ProjectsView lists them with
   cover thumbnails, rename, delete. Esc returns to the canvas.
 - **Multi-project, undo/redo, ⌘V paste-to-upload, drag-from-handle to spawn next.**
-- **Pay-per-use, no accounts.** Generations settle in USDC via x402 from a local wallet that
-  auto-creates on first launch (Base or Solana, switchable in Settings) — no subscription, no
-  API keys, no dashboards. Shares one wallet with Franklin core.
+- **Two pay-per-use options.** Use a BlockRun account API key, or settle in USDC via x402
+  from a local wallet (Solana first, Base also supported). Account credentials stay in the local
+  backend and are never sent to the browser.
 
 ## Quick start
+
+Create a free account at **[user.blockrun.ai](https://user.blockrun.ai)**, add credits at
+[Billing](https://user.blockrun.ai/dashboard/credits), then create a key at
+[API Keys](https://user.blockrun.ai/dashboard/keys).
 
 ```bash
 git clone https://github.com/BlockRunAI/franklin-canvas.git
 cd franklin-canvas
 npm install
-npm start            # → http://localhost:5173
+BLOCKRUN_API_KEY=brk_... npm start   # → http://localhost:5173
 ```
 
-Requires Node 18+ (uses native `fetch`). `npm start` boots both halves with `[api]`
-and `[ui]` log prefixes; `Ctrl-C` stops them together.
+The API key stays in the local Node backend. Franklin Canvas never stores it in browser
+storage or returns it from an endpoint. To use a self-hosted account API, set
+`BLOCKRUN_API_BASE_URL` alongside the key. Requires Node 18+ (native `fetch`).
 
-> 💸 **To actually generate, top up the wallet with USDC.** A wallet auto-creates on
-> first launch; the PromptBar shows its address while the balance is under $0.01 (click
-> to copy). Send a few USDC on **Base** (or Solana) to that address and you're ready —
-> every generation pays per call, no subscription. See [Wallet](#wallet) below.
+### x402 wallet mode
 
-### Wallet
-
-Wallet config is **identical to [Franklin core](https://github.com/BlockRunAI/Franklin)** —
-same files, same env var names. If you already use Franklin, the canvas picks up your
-existing wallet automatically. Otherwise it creates one on first request:
+If `BLOCKRUN_API_KEY` is unset, Canvas keeps the existing wallet flow. Wallet config is
+shared with [Franklin core](https://github.com/BlockRunAI/Franklin). Solana is shown first
+and Base remains available in Settings → Billing.
 
 | Chain  | Wallet file (auto-created)     | Env override               |
 |--------|--------------------------------|----------------------------|
-| Base   | `~/.blockrun/wallet`           | `BASE_CHAIN_WALLET_KEY`    |
 | Solana | `~/.blockrun/solana-wallet`    | `SOLANA_WALLET_KEY`        |
+| Base   | `~/.blockrun/wallet`           | `BASE_CHAIN_WALLET_KEY`    |
 
-The UI works with an empty wallet — Send just returns an error until the address is
-funded. PromptBar's top banner shows the address while the balance is below $0.01,
-clickable to copy.
+Fund the selected address with USDC on the same chain. Every generation settles per call
+through x402. Do not set a wallet key together with `BLOCKRUN_API_KEY`; account mode takes
+priority and does not create or read a wallet.
 
 ### Running the halves separately
 
@@ -151,18 +150,18 @@ If you serve the backend on a public host, set:
 ALLOWED_ORIGINS=https://your.app   # comma-separated whitelist; rejects everything else
 ```
 
-Otherwise CORS stays wide open for localhost dev. Note that the architecture is
-single-user-per-machine — every visitor would share the host's wallet, so a real
-multi-tenant deployment needs additional work.
+Otherwise CORS stays wide open for localhost dev. The backend uses one billing
+credential per process, so a public multi-tenant deployment needs per-user auth
+and credential isolation.
 
 ## Architecture
 
 ```
 Browser  (Vite dev / built dist/)
-   │  fetch /api/...  (wallet · generate · prompts · agent · comparison · transactions)
+   │  fetch /api/...  (billing · generate · prompts · agent · comparison · transactions)
    ▼
-server.mjs  (this repo)
-   │  @blockrun/llm  (signs x402 payments on Base or Solana)
+server.mjs  (holds account key or wallet credentials locally)
+   │  @blockrun/llm  (account API or x402 on Solana / Base)
    ▼
 BlockRun gateway  ──  image / video / music / chat models
 ```
@@ -180,12 +179,12 @@ or portrait, with the model badge burned in at a caller-chosen position.
 
 The frontend is model-agnostic: it POSTs `{ kind, prompt, model, … }` to
 `/api/generate`, and the backend maps that onto the right `@blockrun/llm` client
-(`ImageClient`, `MusicClient`, manual fetch+poll for video), pays per call, saves the
+(`ImageClient`, `MusicClient`, `VideoClient` for account billing; the existing signed flow for wallet video), pays per call, saves the
 bytes locally, and returns a `/api/generated/<id>.<ext>` URL the UI renders.
 
-**Video generation** uses a manual submit + poll loop instead of the SDK's auto-poll
-so the client can re-sign `402` challenges that arrive mid-poll, with a real 20-minute
-deadline for slow cinematic models like Seedance 2.0 Pro.
+**Video generation** uses the SDK's account-owned polling in API key mode. Wallet mode
+keeps the signed submit + poll loop so it can refresh x402 authorization during long jobs.
+Account video requires the account API video deployment to be enabled by the operator.
 
 **Pricing** is read live from the gateway's `/v1/models` endpoint at edit time, so
 `src/canvas/nodes.tsx`'s `IMAGE_MODELS` / `VIDEO_MODELS` mirror what the gateway

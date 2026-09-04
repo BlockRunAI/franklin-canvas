@@ -1,5 +1,5 @@
-// Settings modal for franklin-canvas. Wallet-based (pay-per-call USDC via
-// x402), so the panes are: Wallet (live balance + spend from the daemon),
+// Settings modal for franklin-canvas. Supports account API billing or a local
+// x402 wallet, so the panes are: Billing (account portal or wallet details),
 // Models (the BlockRun catalog with per-call pricing), Canvas (appearance),
 // and About. Centered modal with a left rail + detail pane.
 
@@ -34,7 +34,7 @@ interface Props {
 }
 
 function WalletPane() {
-  const [chain, setChain] = useState<WalletChain>('base');
+  const [chain, setChain] = useState<WalletChain>('solana');
   const [w, setW] = useState<WalletInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(false);
@@ -59,8 +59,8 @@ function WalletPane() {
   };
 
   const chainOptions: { id: WalletChain; label: string; hint: string }[] = [
-    { id: 'base', label: 'Base', hint: 'USDC on Base (EVM)' },
     { id: 'solana', label: 'Solana', hint: 'USDC on Solana' },
+    { id: 'base', label: 'Base', hint: 'USDC on Base (EVM)' },
   ];
 
   const chainSwitch = (
@@ -96,6 +96,27 @@ function WalletPane() {
     </div>
   );
 
+  if (w.authMode === 'api-key') return (
+    <div className="settings-pane-section">
+      <h2>Account API</h2>
+      <div className="settings-balance">
+        <span className="settings-balance-num">Active</span>
+        <span className="settings-balance-unit">BlockRun account billing</span>
+      </div>
+      <p className="settings-foot-note">
+        Requests use the API key held by this local backend. The key is never sent to the browser.
+      </p>
+      <div className="settings-links">
+        <a href={w.creditsUrl || 'https://user.blockrun.ai/dashboard/credits'} target="_blank" rel="noopener noreferrer">
+          Manage credits <ExternalLink size={12} aria-hidden />
+        </a>
+        <a href={w.keysUrl || 'https://user.blockrun.ai/dashboard/keys'} target="_blank" rel="noopener noreferrer">
+          Manage API keys <ExternalLink size={12} aria-hidden />
+        </a>
+      </div>
+    </div>
+  );
+
   const short = w.address ? `${w.address.slice(0, 6)}…${w.address.slice(-4)}` : '—';
   const isEmpty = !w.address;
 
@@ -113,7 +134,7 @@ function WalletPane() {
       ) : (
       <>
       <div className="settings-balance">
-        <span className="settings-balance-num">${w.balanceUsdc.toFixed(2)}</span>
+        <span className="settings-balance-num">${(w.balanceUsdc ?? 0).toFixed(2)}</span>
         <span className="settings-balance-unit">USDC on {w.network}</span>
       </div>
       <dl className="settings-kv">
@@ -130,7 +151,7 @@ function WalletPane() {
           <dt>Loaded from</dt>
           <dd><code>{chain === 'solana' ? '~/.blockrun/solana-wallet' : '~/.blockrun/wallet'}</code></dd>
         </div>
-        <div><dt>Spent (24h)</dt><dd>${w.recentSpendUsd.toFixed(2)}</dd></div>
+        <div><dt>Spent (24h)</dt><dd>${(w.recentSpendUsd ?? 0).toFixed(2)}</dd></div>
         {typeof w.totalSpendUsd === 'number' && w.totalSpendUsd > 0 && (
           <div><dt>Spent (all-time, shared wallet)</dt><dd>${w.totalSpendUsd.toFixed(2)}</dd></div>
         )}
@@ -273,7 +294,7 @@ function AboutPane() {
       <p className="settings-foot-note">{t('about_blurb')}</p>
       <dl className="settings-kv">
         <div><dt>{t('about_version')}</dt><dd>0.1.0</dd></div>
-        <div><dt>{t('about_gateway')}</dt><dd>BlockRun · x402 on Base &amp; Solana</dd></div>
+        <div><dt>{t('about_gateway')}</dt><dd>BlockRun · Account API · x402 on Solana &amp; Base</dd></div>
       </dl>
       <h3 className="settings-subhead">{t('about_credits')}</h3>
       <p className="settings-foot-note">{t('about_credits_blurb')}</p>
@@ -286,6 +307,9 @@ function AboutPane() {
         </a>
         <a href="https://github.com/BlockRunAI/Prompt-Case-Hub" target="_blank" rel="noopener noreferrer">
           Prompt library source <ExternalLink size={12} aria-hidden />
+        </a>
+        <a href="https://user.blockrun.ai" target="_blank" rel="noopener noreferrer">
+          Create BlockRun account <ExternalLink size={12} aria-hidden />
         </a>
       </div>
     </div>

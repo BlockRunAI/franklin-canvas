@@ -30,7 +30,7 @@ export async function listSessions(): Promise<Session[]> {
   }));
 }
 
-export async function getWallet(chain: WalletChain = 'base'): Promise<WalletInfo> {
+export async function getWallet(chain: WalletChain = 'solana'): Promise<WalletInfo> {
   const r = await fetch(`${base}/wallet?chain=${chain}`);
   if (!r.ok) throw new Error(`wallet ${r.status}`);
   const raw = await r.json();
@@ -38,11 +38,15 @@ export async function getWallet(chain: WalletChain = 'base'): Promise<WalletInfo
   // Normalize to our shape.
   return {
     address: String(raw.address ?? ''),
-    balanceUsdc: Number(raw.balanceUsdc ?? raw.balance?.usdc ?? raw.usdc ?? 0),
-    recentSpendUsd: Number(raw.recentSpendUsd ?? raw.recent_spend_usd ?? raw.spend_24h ?? 0),
-    totalSpendUsd: Number(raw.totalSpendUsd ?? raw.total_spend_usd ?? 0),
+    balanceUsdc: raw.balanceUsdc == null && raw.balance?.usdc == null && raw.usdc == null ? null : Number(raw.balanceUsdc ?? raw.balance?.usdc ?? raw.usdc),
+    recentSpendUsd: raw.recentSpendUsd == null && raw.recent_spend_usd == null && raw.spend_24h == null ? null : Number(raw.recentSpendUsd ?? raw.recent_spend_usd ?? raw.spend_24h),
+    totalSpendUsd: raw.totalSpendUsd == null && raw.total_spend_usd == null ? null : Number(raw.totalSpendUsd ?? raw.total_spend_usd),
     network: String(raw.network ?? (chain === 'solana' ? 'Solana' : 'Base')),
-    chain: (raw.chain as WalletChain) ?? chain,
+    chain: (raw.chain as WalletInfo['chain']) ?? chain,
+    authMode: raw.authMode === 'api-key' ? 'api-key' : 'wallet',
+    portalUrl: raw.portalUrl ? String(raw.portalUrl) : undefined,
+    keysUrl: raw.keysUrl ? String(raw.keysUrl) : undefined,
+    creditsUrl: raw.creditsUrl ? String(raw.creditsUrl) : undefined,
     isNew: !!raw.isNew,
     spendByCategory: raw.spendByCategory ?? raw.spend_by_category ?? [],
   };

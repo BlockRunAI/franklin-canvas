@@ -12,7 +12,7 @@ type SettingsSection = 'wallet' | 'models' | 'canvas' | 'about';
 const TITLES: Record<Route, string> = {
   canvas: 'Canvas',
   projects: 'Projects',
-  wallet: 'Wallet',
+  wallet: 'Billing',
   comparison: 'Comparison',
 };
 

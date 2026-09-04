@@ -481,7 +481,11 @@ Keep replies concise. Think in actions, not essays.`;
 
 const clamp = (s, n) => (s.length > n ? s.slice(0, n) + `\n… [truncated, ${s.length} chars total]` : s);
 
-function llm(ctx) { return new LLMClient({ privateKey: ctx.privateKey, apiUrl: ctx.apiUrl }); }
+function clientOptions(ctx) {
+  return ctx.clientOptions || { privateKey: ctx.privateKey, apiUrl: ctx.apiUrl };
+}
+
+function llm(ctx) { return new LLMClient(clientOptions(ctx)); }
 
 // Strip a fetched HTML document down to readable text.
 function htmlToText(html) {
@@ -573,7 +577,7 @@ function runShell(command, timeoutMs) {
 export async function runBackendTool(name, input = {}, ctx) {
   switch (name) {
     case 'web_search': {
-      const sc = new SearchClient({ privateKey: ctx.privateKey, apiUrl: ctx.apiUrl });
+      const sc = new SearchClient(clientOptions(ctx));
       const r = await sc.search(input.query, { maxResults: input.max_results || 8 });
       const cites = (r.citations || []).map((c) => `- ${c.title || c.url || ''} ${c.url || ''}`.trim()).join('\n');
       return clamp(`${r.summary || ''}${cites ? `\n\nSources:\n${cites}` : ''}`, 8000);
@@ -605,6 +609,9 @@ export async function runBackendTool(name, input = {}, ctx) {
       return `POST ${input.url} → ${resp.status} ${resp.statusText}`;
     }
     case 'wallet_status': {
+      if (ctx.authMode === 'api-key') {
+        return `BlockRun account API billing is active. Manage credits at ${ctx.creditsUrl || 'https://user.blockrun.ai/dashboard/credits'}.`;
+      }
       try {
         const c = llm(ctx);
         const bal = await c.getBalance().catch(() => null);
@@ -694,7 +701,7 @@ export async function describeMedia({ imageUrl, question }, ctx) {
   }
   if (tmp) { try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ } }
   if (!url) throw new Error('no image to describe');
-  const br = new BlockrunClient({ privateKey: ctx.privateKey, apiUrl: ctx.apiUrl, timeout: 120000 });
+  const br = new BlockrunClient({ ...clientOptions(ctx), timeout: 120000 });
   const resp = await br.post('/v1/chat/completions', {
     model: VISION_MODEL,
     max_tokens: 700,

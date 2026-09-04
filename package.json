@@ -1,7 +1,7 @@
 {
   "name": "@blockrun/franklin-canvas",
   "version": "0.1.0",
-  "description": "Franklin Canvas — node-based AI media studio (image, video, music) with x402 wallet payments via the BlockRun gateway",
+  "description": "Franklin Canvas — node-based AI media studio with BlockRun account API and x402 wallet billing",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -21,11 +21,12 @@
     "dev": "vite",
     "server": "node server.mjs",
     "build": "tsc -b && vite build",
+    "test": "node --test test/*.test.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@blockrun/llm": "^2.1.1",
+    "@blockrun/llm": "^3.13.6",
     "@xyflow/react": "^12.4.0",
     "lucide-react": "^1.14.0",
     "react": "^19.0.0",
